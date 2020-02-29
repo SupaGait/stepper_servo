@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug (OpenOCD)",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+            "device": "STM32F103C8T6",
+            "cwd": "${workspaceRoot}",
+            "executable": "./target/thumbv7m-none-eabi/debug/stm32_blink",
+            "svdFile": "${workspaceRoot}/STM32F103.svd",
+            "configFiles": ["interface/stlink.cfg", "target/stm32f1x.cfg"],
+            "preLaunchTask": "build",
+            "runToMain": true
+        }
+    ]
+}

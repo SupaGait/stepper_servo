@@ -1,0 +1,10 @@
+[build]
+# Instruction set of Cortex-M3 (used in BluePill)
+target = "thumbv7m-none-eabi"
+
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+runner = "arm-none-eabi-gdb -x openocd.gdb"
+rustflags = [
+  # use the Tlink.x scrip from the cortex-m-rt crate
+  "-C", "link-arg=-Tlink.x",
+]
