@@ -18,9 +18,15 @@
         {
             "label": "Load Firmware",
             "type": "shell",
-            "command": "st-flash write ./target/thumbv7m-none-eabi/debug/stm32_blink 0x08000000",
+            "command": "C:/Program Files (x86)/STMicroelectronics/STM32 ST-LINK Utility/ST-LINK Utility/ST-LINK_CLI.exe",
+            "args": [
+                "-c",
+                "SWD",
+                "-P",
+                "./target/thumbv7m-none-eabi/debug/stm32_blink",
+                "-rst"],
             "options": {
-                "cwd": "${workspaceRoot}"
+                "cwd": "${workspaceRoot}",
             },
             "group": {
                 "kind": "build",
