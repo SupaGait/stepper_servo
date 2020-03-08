@@ -14,7 +14,7 @@ use stm32f1::stm32f103;
 fn main() -> ! {
     // get handles to the hardware
     let peripherals = stm32f103::Peripherals::take().unwrap();
-    let gpioc = &peripherals.GPIOC;
+    let gpioc = &peripherals.GPIOC; 
     let rcc = &peripherals.RCC;
 
     // enable the GPIO clock for IO port C

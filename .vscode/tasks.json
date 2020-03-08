@@ -16,14 +16,28 @@
             }
         },
         {
-            "label": "Load Firmware",
+            "label": "copy_binary",
+            "type": "shell",
+            "command": "arm-none-eabi-objcopy",
+            "args": [
+                "--output-target", "binary",
+                "./target/thumbv7m-none-eabi/debug/stm32_blink",
+                "./target/thumbv7m-none-eabi/debug/stm32_blink.bin"],
+            "options": {
+                "cwd": "${workspaceRoot}",
+            },
+            "problemMatcher": [],
+        },
+        {
+            "label": "load_firmware",
             "type": "shell",
             "command": "C:/Program Files (x86)/STMicroelectronics/STM32 ST-LINK Utility/ST-LINK Utility/ST-LINK_CLI.exe",
             "args": [
                 "-c",
                 "SWD",
                 "-P",
-                "./target/thumbv7m-none-eabi/debug/stm32_blink",
+                "./target/thumbv7m-none-eabi/debug/stm32_blink.bin",
+                "0x08000000",
                 "-rst"],
             "options": {
                 "cwd": "${workspaceRoot}",
@@ -32,7 +46,8 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": []
+            "problemMatcher": [],
+            "dependsOn": "copy_binary"
         }
     ]
 }
