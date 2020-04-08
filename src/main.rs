@@ -1,33 +1,38 @@
-// std and main are not available for bare metal software
 #![no_std]
 #![no_main]
 
-extern crate stm32f1;
-extern crate panic_halt;
-extern crate cortex_m_rt;
-
 use cortex_m_rt::entry;
-use stm32f1::stm32f103;
+use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
+use panic_halt as _;
+use stm32f1xx_hal::{adc, gpio, pac, prelude::*};
+
+//mod currentControl;
+
+fn toggle_led<T>(pin: &mut T)
+where
+    T: ToggleableOutputPin,
+{
+    //pin.set_high().ok();
+    pin.toggle().ok();
+}
 
 // use `main` as the entry point of this application
 #[entry]
 fn main() -> ! {
-    // get handles to the hardware
-    let peripherals = stm32f103::Peripherals::take().unwrap();
-    let gpioc = &peripherals.GPIOC; 
-    let rcc = &peripherals.RCC;
+    let peripherals = pac::Peripherals::take().unwrap();
+    let mut rcc = peripherals.RCC.constrain();
+    let mut flash = peripherals.FLASH.constrain();
 
-    // enable the GPIO clock for IO port C
-    rcc.apb2enr.write(|w| w.iopcen().set_bit());
-    gpioc.crh.write(|w| unsafe{
-        w.mode13().bits(0b11);
-        w.cnf13().bits(0b00)
-    });
+    let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
+    let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
 
-    loop{
-        gpioc.bsrr.write(|w| w.bs13().set_bit());
-        cortex_m::asm::delay(200000);
-        gpioc.brr.write(|w| w.br13().set_bit());
-        cortex_m::asm::delay(200000);
+    let mut _gpioa = peripherals.GPIOA.split(&mut rcc.apb2);
+    let mut gpioc = peripherals.GPIOC.split(&mut rcc.apb2);
+
+    let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+
+    loop {
+        cortex_m::asm::delay(2000000);
+        toggle_led(&mut led);
     }
 }

@@ -5,8 +5,11 @@
     "tasks": [
         {
             "label": "build",
-            "type": "cargo",
-            "subcommand": "build",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build",
+            ],
             "problemMatcher": [
                 "$rustc"
             ],
@@ -20,13 +23,16 @@
             "type": "shell",
             "command": "arm-none-eabi-objcopy",
             "args": [
-                "--output-target", "binary",
+                "--output-target",
+                "binary",
                 "./target/thumbv7m-none-eabi/debug/stm32_blink",
-                "./target/thumbv7m-none-eabi/debug/stm32_blink.bin"],
+                "./target/thumbv7m-none-eabi/debug/stm32_blink.bin"
+            ],
             "options": {
                 "cwd": "${workspaceRoot}",
             },
             "problemMatcher": [],
+            "dependsOn": "build"
         },
         {
             "label": "load_firmware",
@@ -38,7 +44,8 @@
                 "-P",
                 "./target/thumbv7m-none-eabi/debug/stm32_blink.bin",
                 "0x08000000",
-                "-rst"],
+                "-rst"
+            ],
             "options": {
                 "cwd": "${workspaceRoot}",
             },
