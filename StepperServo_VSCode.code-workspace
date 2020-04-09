@@ -1,8 +1,12 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"settings": {}
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "rust-analyzer.checkOnSave.allTargets": false
+    },
+    "rust.target": "thumbv7em-none-eabihf",
+    "rust.all_targets": false
 }

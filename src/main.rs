@@ -2,21 +2,12 @@
 #![no_main]
 
 use cortex_m_rt::entry;
-use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
+//use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use panic_halt as _;
-use stm32f1xx_hal::{adc, gpio, pac, prelude::*};
+use stm32f1xx_hal::{adc, pac, prelude::*};
 
-//mod currentControl;
+mod current_control;
 
-fn toggle_led<T>(pin: &mut T)
-where
-    T: ToggleableOutputPin,
-{
-    //pin.set_high().ok();
-    pin.toggle().ok();
-}
-
-// use `main` as the entry point of this application
 #[entry]
 fn main() -> ! {
     let peripherals = pac::Peripherals::take().unwrap();
@@ -26,13 +17,15 @@ fn main() -> ! {
     let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
     let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
 
-    let mut _gpioa = peripherals.GPIOA.split(&mut rcc.apb2);
-    let mut gpioc = peripherals.GPIOC.split(&mut rcc.apb2);
+    let mut gpiob = peripherals.GPIOB.split(&mut rcc.apb2);
+    let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
 
-    let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+    let mut current_control = current_control::CurrentControl
+        ::new(adc1, ch0, 4.2);
+
+    current_control.set_current(0.5);
 
     loop {
-        cortex_m::asm::delay(2000000);
-        toggle_led(&mut led);
+        current_control.update();
     }
 }
