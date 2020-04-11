@@ -1,34 +1,43 @@
+use stm32f1xx_hal as hal;
 use embedded_hal::adc::Channel;
 use embedded_hal::adc::OneShot;
-use stm32f1xx_hal as hal;
+use embedded_hal::PwmPin;
 
 /// For now hard bound to ADC1
-pub struct CurrentControl<PIN>
+pub struct CurrentControl<PIN, PWM>
 {
     adc: hal::adc::Adc<hal::stm32::ADC1>,
     pins: PIN,
     shunt_resistance: f32,
-    req_current: f32,
+    current_setpoint: f32,
+    pwm: PWM,
 }
 
-impl<PIN> CurrentControl<PIN>
+impl<PIN, PWM> CurrentControl<PIN, PWM>
+where 
+    PIN: Channel<hal::stm32::ADC1, ID = u8>,
+    PWM: PwmPin<Duty = u16>,
 {
-    pub fn new(adc: hal::adc::Adc<hal::stm32::ADC1>, pins: PIN, shunt_resistance: f32 ) -> Self
-    where 
-        PIN: Channel<hal::stm32::ADC1, ID = u8>,
+    pub fn new(
+        adc: hal::adc::Adc<hal::stm32::ADC1>, 
+        pins: PIN, 
+        shunt_resistance: f32,
+        pwm: PWM,
+    ) -> Self
     {
-        CurrentControl 
+        Self 
         {
             adc,
             pins,
             shunt_resistance,
-            req_current : 0.0,
+            current_setpoint : 0.0,
+            pwm,
         }
     }
 
     pub fn set_current(& mut self, amps: f32)
     {
-        self.req_current = amps;
+        self.current_setpoint = amps;
     }
 
     pub fn update(& mut self)
@@ -36,8 +45,28 @@ impl<PIN> CurrentControl<PIN>
         PIN: Channel<hal::stm32::ADC1, ID = u8>,
     {
         let adc_value: u16 = self.adc.read(&mut self.pins).unwrap();
-        let voltage = adc_value as f32 / 255.0;
-        let _current =  voltage / self.shunt_resistance;
+        let voltage_measured = adc_value as f32 / 255.0;
+        let current_measured =  voltage_measured / self.shunt_resistance;
+        self.calc_pwm(current_measured);
+    }
+
+    fn calc_pwm(&mut self, current_measured : f32)
+    {
+        let current_delta = self.current_setpoint - current_measured;
+        if current_delta > 0.01 {
+            let duty_cyle = self.pwm.get_duty();
+            if duty_cyle != u16::min_value()
+            {
+                self.pwm.set_duty(duty_cyle - 1);
+            }
+        }
+        if current_delta < 0.01 {
+            let duty_cyle = self.pwm.get_duty();
+            if duty_cyle != u16::max_value()
+            {
+                self.pwm.set_duty(duty_cyle + 1);
+            }
+        }
     }
 }
 

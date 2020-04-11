@@ -5,13 +5,12 @@ authors = ["Supagait <gklomphaar@hotmail.com>"]
 edition = "2018"
 
 [profile.release]
-# optimize for size ('z' would optimize even more)
-#opt-level = 's'
-# link with link time optimization (lto).
-#lto = true
-# enable debugging in release mode.
+opt-level = 's'
+lto = true
 #debug = true
 
+[profile.dev]
+opt-level = 1
 
 [dependencies]
 embedded-hal = "0.2.3"
@@ -23,10 +22,15 @@ cortex-m-rt = "0.6.11"
 # provies a panic-handler (halting cpu)
 # (required when not using stdlib)
 panic-halt = "0.2.0"
+# Higher level drivers/functionality
+rotary-encoder-hal = "0.2.1"
+ssd1306 = "0.3.1"
+#embedded-graphics = "0.6.0"
 
 [dependencies.stm32f1xx-hal]
 version = "0.5.3"
 features = ["rt", "stm32f103", "medium"]
+
 
 # Gives us access to the STM32F1 registers
 # stm32f1 = {version = "0.6.0", features = ["stm32f103", "rt"]}
