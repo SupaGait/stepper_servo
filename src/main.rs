@@ -1,93 +1,125 @@
 #![no_std]
 #![no_main]
 
-use cortex_m_rt::entry;
-//use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
+//sizeuse cortex_m_rt::entry;
 use panic_halt as _;
 use stm32f1xx_hal as hal;
 use hal::{
     prelude::*, 
-    adc, pac, gpio, 
+    adc,
+    gpio::{Output, PushPull, gpioa, gpiob, gpioc,}, 
     timer::{Tim2NoRemap, Timer},
-    delay::Delay,
-    i2c::{BlockingI2c, DutyCycle, Mode},};
+    i2c::{BlockingI2c, DutyCycle, Mode},
+};
+use rtfm::cyccnt::{Duration, U32Ext};
 
+// Local modules
 mod current_control;
 mod position_control;
 mod display;
 
-#[entry]
-fn main() -> ! {
-    let peripherals = pac::Peripherals::take().unwrap();
-    let mut rcc = peripherals.RCC.constrain();  
-    let mut flash = peripherals.FLASH.constrain();
+const PERIOD: u32 = 48_000_000; // 48mhz
 
-    let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
-    let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
-
-    let mut gpioa: gpio::gpioa::Parts = peripherals.GPIOA.split(&mut rcc.apb2);
-    let mut gpiob: gpio::gpiob::Parts = peripherals.GPIOB.split(&mut rcc.apb2);
-    let mut gpioc: gpio::gpioc::Parts = peripherals.GPIOC.split(&mut rcc.apb2);
-
-    // Current control
-    //ADC
-    let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
-    //PWM
-    let pwm_pin = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
-    let mut afio = peripherals.AFIO.constrain(&mut rcc.apb2);
-    let timer2 = Timer::tim2(peripherals.TIM2, &clocks, &mut rcc.apb1);
-    let mut pwm_timer2 = timer2.pwm::<Tim2NoRemap, _, _, _>(
-        pwm_pin, 
-        &mut afio.mapr,
-        1.khz());
-    pwm_timer2.enable();
-
-    // Control
-    let mut current_control = current_control::CurrentControl::new(
-        adc1, 
-        ch0, 
-        4.2,
-        pwm_timer2);
-    current_control.set_current(0.5);
-
-    // Position control
-    let pin_a = gpiob.pb10.into_pull_up_input( &mut gpiob.crh);
-    let pin_b = gpiob.pb11.into_pull_up_input( &mut gpiob.crh);
-    let mut position_control = position_control::PositionControl
-        ::new(pin_a, pin_b);
-
-    // Led
-    let cp = cortex_m::Peripherals::take().unwrap();
-    let mut delay = Delay::new(cp.SYST, clocks);
-    let mut onboard_led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
-
-    // Display
-    let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
-    let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
-    let i2c = BlockingI2c::i2c1(
-        peripherals.I2C1,
-        (scl, sda),
-        &mut afio.mapr,
-        Mode::Fast {
-            frequency: 400_000.hz(),
-            duty_cycle: DutyCycle::Ratio2to1,
-        },
-        clocks,
-        &mut rcc.apb1,
-        1000,
-        10,
-        1000,
-        1000,
-    );
-    let mut display = display::Display::new(i2c);
-
-    // Update
-    loop {
-        current_control.update();
-        position_control.update();
-        display.update();
-        
-        delay.delay_ms(1000_u16);
-        onboard_led.toggle().ok();
+#[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
+const APP: () = {
+    struct Resources<I2C> {
+        current_control: current_control::CurrentControl<stm32f1xx_hal::gpio::gpiob::PB0<stm32f1xx_hal::gpio::Analog>, stm32f1xx_hal::pwm::Pwm<hal::device::TIM2, stm32f1xx_hal::pwm::C1>>,
+        position_control: position_control::PositionControl<stm32f1xx_hal::gpio::gpiob::PB10<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>, stm32f1xx_hal::gpio::gpiob::PB11<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>>,
+        onboard_led: gpioc::PC13<Output<PushPull>>,
+        display: display::Display<ssd1306::interface::i2c::I2cInterface<stm32f1xx_hal::i2c::BlockingI2c<hal::device::I2C1, (stm32f1xx_hal::gpio::gpiob::PB6<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>>>,
     }
-}
+
+    #[init(schedule = [blink_led])]
+    fn init(cx: init::Context)  -> init::LateResources {
+        let peripherals = cx.device;
+        let mut rcc = peripherals.RCC.constrain();  
+        let mut flash = peripherals.FLASH.constrain();
+
+        let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
+        let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
+
+        let mut gpioa: gpioa::Parts = peripherals.GPIOA.split(&mut rcc.apb2);
+        let mut gpiob: gpiob::Parts = peripherals.GPIOB.split(&mut rcc.apb2);
+        let mut gpioc: gpioc::Parts = peripherals.GPIOC.split(&mut rcc.apb2);
+
+        // Current control
+        //ADC
+        let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
+        //PWM
+        let pwm_pin = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
+        let mut afio = peripherals.AFIO.constrain(&mut rcc.apb2);
+        let timer2 = Timer::tim2(peripherals.TIM2, &clocks, &mut rcc.apb1);
+        let mut pwm_timer2 = timer2.pwm::<Tim2NoRemap, _, _, _>(
+            pwm_pin, 
+            &mut afio.mapr,
+            1.khz());
+        pwm_timer2.enable();
+
+        // Control
+        let mut current_control = current_control::CurrentControl::new(
+            adc1, 
+            ch0, 
+            4.2,
+            pwm_timer2);
+        current_control.set_current(0.5);
+
+        // Position control
+        let pin_a = gpiob.pb10.into_pull_up_input( &mut gpiob.crh);
+        let pin_b = gpiob.pb11.into_pull_up_input( &mut gpiob.crh);
+        let position_control = position_control::PositionControl::new(pin_a, pin_b);
+
+        // Led
+        cx.schedule.blink_led(cx.start + PERIOD.cycles()).unwrap();
+
+        let onboard_led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+
+        // Display
+        let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
+        let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
+        let i2c = BlockingI2c::i2c1(
+            peripherals.I2C1,
+            (scl, sda),
+            &mut afio.mapr,
+            Mode::Fast {
+                frequency: 400_000.hz(),
+                duty_cycle: DutyCycle::Ratio2to1,
+            },
+            clocks,
+            &mut rcc.apb1,
+            1000,
+            10,
+            1000,
+            1000,
+        );
+        let display = display::Display::new(i2c);
+        
+        init::LateResources {
+            current_control,
+            position_control,
+            onboard_led,
+            display,
+        }
+    }
+
+    #[task(
+        schedule = [blink_led],
+        resources = [onboard_led],
+    )]
+    fn blink_led(cx: blink_led::Context) {
+        cx.resources.onboard_led.toggle().unwrap();
+        cx.schedule.blink_led(cx.scheduled + Duration::from_cycles(8_000_000_u32)).unwrap();
+    }
+
+    #[idle(resources = [current_control, position_control, display])]
+    fn idle(context: idle::Context) -> ! {
+        loop {
+            context.resources.current_control.update();
+            context.resources.position_control.update();
+            context.resources.display.update();
+        }
+    }
+
+    extern "C" {
+        fn EXTI0();
+    }
+};
