@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-//sizeuse cortex_m_rt::entry;
 use panic_halt as _;
 use stm32f1xx_hal as hal;
 use hal::{
@@ -11,14 +10,15 @@ use hal::{
     timer::{Tim2NoRemap, Timer},
     i2c::{BlockingI2c, DutyCycle, Mode},
 };
-use rtfm::cyccnt::{Duration, U32Ext};
+use rtfm::cyccnt::{U32Ext};
 
 // Local modules
 mod current_control;
 mod position_control;
 mod display;
 
-const PERIOD: u32 = 48_000_000; // 48mhz
+const BLINKING_LED_PERIOD: u32 = 8_000_000;
+const DISPLAY_REFRESH_PARIOD: u32 = 8_000_000/10;
 
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
@@ -29,9 +29,10 @@ const APP: () = {
         display: display::Display<ssd1306::interface::i2c::I2cInterface<stm32f1xx_hal::i2c::BlockingI2c<hal::device::I2C1, (stm32f1xx_hal::gpio::gpiob::PB6<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>>>,
     }
 
-    #[init(schedule = [blink_led])]
+    #[init(schedule = [blink_led, update_display])]
     fn init(cx: init::Context)  -> init::LateResources {
         let peripherals = cx.device;
+        let mut core = cx.core;
         let mut rcc = peripherals.RCC.constrain();  
         let mut flash = peripherals.FLASH.constrain();
 
@@ -41,6 +42,9 @@ const APP: () = {
         let mut gpioa: gpioa::Parts = peripherals.GPIOA.split(&mut rcc.apb2);
         let mut gpiob: gpiob::Parts = peripherals.GPIOB.split(&mut rcc.apb2);
         let mut gpioc: gpioc::Parts = peripherals.GPIOC.split(&mut rcc.apb2);
+
+        // Enable the monotonic timer CYCCNT
+        core.DWT.enable_cycle_counter();
 
         // Current control
         //ADC
@@ -69,9 +73,8 @@ const APP: () = {
         let position_control = position_control::PositionControl::new(pin_a, pin_b);
 
         // Led
-        cx.schedule.blink_led(cx.start + PERIOD.cycles()).unwrap();
-
         let onboard_led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+        cx.schedule.blink_led(cx.start + BLINKING_LED_PERIOD.cycles()).unwrap();
 
         // Display
         let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
@@ -92,6 +95,7 @@ const APP: () = {
             1000,
         );
         let display = display::Display::new(i2c);
+        cx.schedule.update_display(cx.start + DISPLAY_REFRESH_PARIOD.cycles()).unwrap();
         
         init::LateResources {
             current_control,
@@ -101,21 +105,25 @@ const APP: () = {
         }
     }
 
-    #[task(
-        schedule = [blink_led],
-        resources = [onboard_led],
-    )]
+    #[task(schedule = [blink_led], resources = [onboard_led])]
     fn blink_led(cx: blink_led::Context) {
         cx.resources.onboard_led.toggle().unwrap();
-        cx.schedule.blink_led(cx.scheduled + Duration::from_cycles(8_000_000_u32)).unwrap();
+
+        cx.schedule.blink_led(cx.scheduled + BLINKING_LED_PERIOD.cycles()).unwrap();
     }
 
-    #[idle(resources = [current_control, position_control, display])]
-    fn idle(context: idle::Context) -> ! {
+    #[task(schedule = [update_display], resources = [display])]
+    fn update_display(cx: update_display::Context) {
+        cx.resources.display.update(cx.scheduled.elapsed().as_cycles());
+
+        cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PARIOD.cycles()).unwrap();
+    }
+
+    #[idle(resources = [current_control, position_control])]
+    fn idle(cx: idle::Context) -> ! {
         loop {
-            context.resources.current_control.update();
-            context.resources.position_control.update();
-            context.resources.display.update();
+            cx.resources.current_control.update();
+            cx.resources.position_control.update();
         }
     }
 
