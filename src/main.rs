@@ -23,7 +23,7 @@ const DISPLAY_REFRESH_PARIOD: u32 = 8_000_000/10;
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources<I2C> {
-        current_control: current_control::CurrentControl<stm32f1xx_hal::gpio::gpiob::PB0<stm32f1xx_hal::gpio::Analog>, stm32f1xx_hal::pwm::Pwm<hal::device::TIM2, stm32f1xx_hal::pwm::C1>>,
+        current_control: current_control::CurrentControl<stm32f1xx_hal::pwm::Pwm<hal::device::TIM2, stm32f1xx_hal::pwm::C1>>,
         position_control: position_control::PositionControl<stm32f1xx_hal::gpio::gpiob::PB10<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>, stm32f1xx_hal::gpio::gpiob::PB11<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>>,
         onboard_led: gpioc::PC13<Output<PushPull>>,
         display: display::Display<ssd1306::interface::i2c::I2cInterface<stm32f1xx_hal::i2c::BlockingI2c<hal::device::I2C1, (stm32f1xx_hal::gpio::gpiob::PB6<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>>>,
@@ -36,21 +36,21 @@ const APP: () = {
         let mut rcc = peripherals.RCC.constrain();  
         let mut flash = peripherals.FLASH.constrain();
 
-        let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
-        let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
-        let mut adc1 = adc1.into_interrupt();
-        adc1.enable();
-
         let mut gpioa: gpioa::Parts = peripherals.GPIOA.split(&mut rcc.apb2);
         let mut gpiob: gpiob::Parts = peripherals.GPIOB.split(&mut rcc.apb2);
         let mut gpioc: gpioc::Parts = peripherals.GPIOC.split(&mut rcc.apb2);
 
+        let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
+
+        //ADC
+        let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
+        let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
+        let mut adc1 = adc1.into_interrupt(ch0);
+        adc1.enable();
         // Enable the monotonic timer CYCCNT
         core.DWT.enable_cycle_counter();
 
         // Current control
-        //ADC
-        let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
         //PWM
         let pwm_pin = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
         let mut afio = peripherals.AFIO.constrain(&mut rcc.apb2);
@@ -63,8 +63,7 @@ const APP: () = {
 
         // Control
         let mut current_control = current_control::CurrentControl::new(
-            adc1, 
-            ch0, 
+            adc1,
             4.2,
             pwm_timer2);
         current_control.set_current(0.5);

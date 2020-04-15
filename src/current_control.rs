@@ -1,33 +1,28 @@
-use embedded_hal::adc::Channel;
 use embedded_hal::PwmPin;
 use stm32f1xx_hal as hal;
 
 type AdcType = hal::adc::AdcInt<hal::stm32::ADC1>;
 
 /// For now hard bound to ADC1
-pub struct CurrentControl<PIN, PWM> {
+pub struct CurrentControl<PWM> {
     adc: AdcType,
-    pins: PIN,
     shunt_resistance: f32,
     current_setpoint: f32,
     pwm: PWM,
     adc_value: u16,
 }
 
-impl<PIN, PWM> CurrentControl<PIN, PWM>
+impl<PWM> CurrentControl<PWM>
 where
-    PIN: Channel<hal::stm32::ADC1, ID = u8>,
     PWM: PwmPin<Duty = u16>,
 {
     pub fn new(
         adc: AdcType,
-        pins: PIN,
         shunt_resistance: f32,
         pwm: PWM,
     ) -> Self {
         Self {
             adc,
-            pins,
             shunt_resistance,
             current_setpoint: 0.0,
             pwm,
@@ -51,8 +46,6 @@ where
     }
 
     pub fn update(&mut self)
-    where
-        PIN: Channel<hal::stm32::ADC1, ID = u8>,
     {
         let voltage_measured = self.adc_value as f32 / 255.0;
         let current_measured = voltage_measured / self.shunt_resistance;
@@ -75,39 +68,3 @@ where
         }
     }
 }
-
-// pub struct CurrentControl<ADC, Word, Pin, Error, Adc>
-// where   Pin: embedded_hal::adc::Channel<ADC>,
-//         Adc : hal::adc::OneShot<ADC, Word, Pin, Error=Error>
-// {
-//     adc: Adc,
-//     shunt_resistance : f32,
-
-//     _adc: PhantomData<ADC>,
-//     _word: PhantomData<Word>,
-//     _pin: PhantomData<Pin>,
-//     _error: PhantomData<Error>,
-// }
-
-// impl<ADC, Word, Pin, Error, Adc> CurrentControl<ADC, Word, Pin, Error, Adc>
-// where   Pin: embedded_hal::adc::Channel<ADC>,
-//         Adc : hal::adc::OneShot<ADC, Word, Pin, Error=Error>
-// {
-//     pub fn new(adc: Adc, shunt_resistance: f32) -> Self
-//     where   Pin: embedded_hal::adc::Channel<ADC>,
-//             Adc : hal::adc::OneShot<ADC, Word, Pin, Error=Error>
-//     {
-//         Self {
-//             adc,
-//             shunt_resistance,
-//             _adc: PhantomData,
-//             _word: PhantomData,
-//             _pin: PhantomData,
-//             _error: PhantomData,
-//         }
-//     }
-
-//     pub fn set_current(& mut self, current: f32) {}
-
-//     pub fn set_shunt_resistance(& mut self, resistance: f32) {}
-// }
