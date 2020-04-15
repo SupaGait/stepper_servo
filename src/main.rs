@@ -11,6 +11,7 @@ use hal::{
     i2c::{BlockingI2c, DutyCycle, Mode},
 };
 use rtfm::cyccnt::{U32Ext};
+use cortex_m::asm::nop;
 
 // Local modules
 mod current_control;
@@ -18,7 +19,8 @@ mod position_control;
 mod display;
 
 const BLINKING_LED_PERIOD: u32 = 8_000_000;
-const DISPLAY_REFRESH_PARIOD: u32 = 8_000_000/10;
+const DISPLAY_REFRESH_PERIOD: u32 = 8_000_000/10;
+const CONTROL_REFRESH_PERIOD: u32 = 8_000_000/1_000;
 
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
@@ -29,7 +31,7 @@ const APP: () = {
         display: display::Display<ssd1306::interface::i2c::I2cInterface<stm32f1xx_hal::i2c::BlockingI2c<hal::device::I2C1, (stm32f1xx_hal::gpio::gpiob::PB6<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>>>,
     }
 
-    #[init(schedule = [blink_led, update_display])]
+    #[init(schedule = [blink_led, update_display, control_loop])]
     fn init(cx: init::Context)  -> init::LateResources {
         let peripherals = cx.device;
         let mut core = cx.core;
@@ -96,7 +98,9 @@ const APP: () = {
             1000,
         );
         let display = display::Display::new(i2c);
-        cx.schedule.update_display(cx.start + DISPLAY_REFRESH_PARIOD.cycles()).unwrap();
+        cx.schedule.update_display(cx.start + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
+
+        cx.schedule.control_loop(cx.start + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
         
         init::LateResources {
             current_control,
@@ -115,10 +119,19 @@ const APP: () = {
 
     #[task(schedule = [update_display], resources = [display, current_control])]
     fn update_display(cx: update_display::Context) {
-        cx.resources.display.update(0, cx.scheduled.elapsed().as_cycles());
-        cx.resources.display.update(1, cx.resources.current_control.adc_value() as u32);
+        cx.resources.display.update("Cyc", 0, cx.scheduled.elapsed().as_cycles());
+        cx.resources.display.update("ADC", 2, cx.resources.current_control.adc_value() as u32);
+        cx.resources.display.update("Dut", 3, cx.resources.current_control.duty_cycle() as u32);
 
-        cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PARIOD.cycles()).unwrap();
+        cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
+    }
+
+    #[task(schedule = [control_loop], resources = [current_control, position_control])]
+    fn control_loop(cx: control_loop::Context) {
+        cx.resources.current_control.update();
+        cx.resources.position_control.update();
+
+        cx.schedule.control_loop(cx.scheduled + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
     }
 
     #[task(binds = ADC1_2, resources = [current_control])]
@@ -126,10 +139,10 @@ const APP: () = {
         cx.resources.current_control.handle_adc_interrupt();
     }
 
-    #[idle(resources = [current_control, position_control])]
-    fn idle(cx: idle::Context) -> ! {
+    #[idle(resources = [])]
+    fn idle(_cx: idle::Context) -> ! {
         loop {
-            cx.resources.position_control.update();
+            nop();
         }
     }
 

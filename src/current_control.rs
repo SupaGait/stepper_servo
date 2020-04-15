@@ -10,6 +10,7 @@ pub struct CurrentControl<PWM> {
     current_setpoint: f32,
     pwm: PWM,
     adc_value: u16,
+    duty_cyle: u16,
 }
 
 impl<PWM> CurrentControl<PWM>
@@ -27,6 +28,7 @@ where
             current_setpoint: 0.0,
             pwm,
             adc_value: 0,
+            duty_cyle: 0,
         }
     }
 
@@ -45,6 +47,10 @@ where
         self.adc_value
     }
 
+    pub fn duty_cycle(&self) -> u16 {
+        self.duty_cyle
+    }
+
     pub fn update(&mut self)
     {
         let voltage_measured = self.adc_value as f32 / 255.0;
@@ -55,15 +61,17 @@ where
     fn calc_pwm(&mut self, current_measured: f32) {
         let current_delta = self.current_setpoint - current_measured;
         if current_delta > 0.01 {
-            let duty_cyle = self.pwm.get_duty();
-            if duty_cyle != u16::min_value() {
-                self.pwm.set_duty(duty_cyle - 1);
+            //let duty_cyle = self.pwm.get_duty();
+            if self.duty_cyle != u16::min_value() {
+                self.duty_cyle -= 1;
+                self.pwm.set_duty(self.duty_cyle);
             }
         }
         if current_delta < 0.01 {
-            let duty_cyle = self.pwm.get_duty();
-            if duty_cyle != u16::max_value() {
-                self.pwm.set_duty(duty_cyle + 1);
+            //let duty_cyle = self.pwm.get_duty();
+            if self.duty_cyle != u16::max_value() {
+                self.duty_cyle += 1;
+                self.pwm.set_duty(self.duty_cyle);
             }
         }
     }

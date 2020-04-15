@@ -18,9 +18,9 @@ where
         Self { display }
     }
 
-    pub fn update(&mut self, row: u8, value: u32) {
+    pub fn update(&mut self, label: &str, row: u8, value: u32) {
         //self.display.clear().ok();
         self.display.set_position(0, row).ok();
-        write!(self.display, "{}", value).expect("Can't write");
+        write!(self.display, "{}:{}", label, value).expect("Can't write");
     }
 }
