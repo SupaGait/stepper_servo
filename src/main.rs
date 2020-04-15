@@ -38,6 +38,8 @@ const APP: () = {
 
         let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
         let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
+        let mut adc1 = adc1.into_interrupt();
+        adc1.enable();
 
         let mut gpioa: gpioa::Parts = peripherals.GPIOA.split(&mut rcc.apb2);
         let mut gpiob: gpiob::Parts = peripherals.GPIOB.split(&mut rcc.apb2);
@@ -112,17 +114,22 @@ const APP: () = {
         cx.schedule.blink_led(cx.scheduled + BLINKING_LED_PERIOD.cycles()).unwrap();
     }
 
-    #[task(schedule = [update_display], resources = [display])]
+    #[task(schedule = [update_display], resources = [display, current_control])]
     fn update_display(cx: update_display::Context) {
-        cx.resources.display.update(cx.scheduled.elapsed().as_cycles());
+        cx.resources.display.update(0, cx.scheduled.elapsed().as_cycles());
+        cx.resources.display.update(1, cx.resources.current_control.adc_value() as u32);
 
         cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PARIOD.cycles()).unwrap();
+    }
+
+    #[task(binds = ADC1_2, resources = [current_control])]
+    fn handle_adc(cx: handle_adc::Context) {
+        cx.resources.current_control.handle_adc_interrupt();
     }
 
     #[idle(resources = [current_control, position_control])]
     fn idle(cx: idle::Context) -> ! {
         loop {
-            cx.resources.current_control.update();
             cx.resources.position_control.update();
         }
     }

@@ -1,15 +1,17 @@
 use embedded_hal::adc::Channel;
-use embedded_hal::adc::OneShot;
 use embedded_hal::PwmPin;
 use stm32f1xx_hal as hal;
 
+type AdcType = hal::adc::AdcInt<hal::stm32::ADC1>;
+
 /// For now hard bound to ADC1
 pub struct CurrentControl<PIN, PWM> {
-    adc: hal::adc::Adc<hal::stm32::ADC1>,
+    adc: AdcType,
     pins: PIN,
     shunt_resistance: f32,
     current_setpoint: f32,
     pwm: PWM,
+    adc_value: u16,
 }
 
 impl<PIN, PWM> CurrentControl<PIN, PWM>
@@ -18,7 +20,7 @@ where
     PWM: PwmPin<Duty = u16>,
 {
     pub fn new(
-        adc: hal::adc::Adc<hal::stm32::ADC1>,
+        adc: AdcType,
         pins: PIN,
         shunt_resistance: f32,
         pwm: PWM,
@@ -29,6 +31,7 @@ where
             shunt_resistance,
             current_setpoint: 0.0,
             pwm,
+            adc_value: 0,
         }
     }
 
@@ -36,12 +39,22 @@ where
         self.current_setpoint = amps;
     }
 
+    pub fn handle_adc_interrupt(&mut self)
+    {
+        if self.adc.is_ready() {
+            self.adc_value = self.adc.read_value();
+        }
+    }
+
+    pub fn adc_value(&self) -> u16 {
+        self.adc_value
+    }
+
     pub fn update(&mut self)
     where
         PIN: Channel<hal::stm32::ADC1, ID = u8>,
     {
-        let adc_value: u16 = self.adc.read(&mut self.pins).unwrap();
-        let voltage_measured = adc_value as f32 / 255.0;
+        let voltage_measured = self.adc_value as f32 / 255.0;
         let current_measured = voltage_measured / self.shunt_resistance;
         self.calc_pwm(current_measured);
     }
