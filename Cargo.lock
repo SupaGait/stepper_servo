@@ -162,6 +162,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "motor-driver"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "nb"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -259,6 +266,7 @@ dependencies = [
  "cortex-m-rt 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "cortex-m-rtfm 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "embedded-hal 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "motor-driver 0.1.0",
  "panic-halt 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rotary-encoder-hal 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "ssd1306 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",

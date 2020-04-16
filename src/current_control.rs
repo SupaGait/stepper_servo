@@ -1,37 +1,64 @@
 use embedded_hal::PwmPin;
 use stm32f1xx_hal as hal;
+use embedded_hal::digital::v2::OutputPin;
+use motor_driver as motor;
+use motor::ic::L298;
 
 type AdcType = hal::adc::AdcInt<hal::stm32::ADC1>;
 
+#[derive(PartialEq)]
+enum Direction { CCW, CW, }
+
 /// For now hard bound to ADC1
-pub struct CurrentControl<PWM> {
+pub struct CurrentControl<PWM, IN1, IN2>
+where
+    PWM: PwmPin<Duty = u16>,
+    IN1: OutputPin,
+    IN2: OutputPin,
+{
     adc: AdcType,
     shunt_resistance: f32,
     current_setpoint: f32,
-    pwm: PWM,
     adc_value: u16,
+    voltage: f32,
     duty_cyle: u16,
+    max_duty_cyle: u16,
+    motor: motor::Motor<IN1, IN2, PWM, L298>,
+    direction: Direction,
 }
 
-impl<PWM> CurrentControl<PWM>
+impl<PWM, IN1, IN2> CurrentControl<PWM, IN1, IN2>
 where
     PWM: PwmPin<Duty = u16>,
+    IN1: OutputPin,
+    IN2: OutputPin,
 {
     pub fn new(
         adc: AdcType,
         shunt_resistance: f32,
         pwm: PWM,
+        in1: IN1,
+        in2: IN2,
     ) -> Self {
-        Self {
+
+
+        let mut s = Self {
             adc,
             shunt_resistance,
             current_setpoint: 0.0,
-            pwm,
             adc_value: 0,
+            voltage: 0.0,
             duty_cyle: 0,
-        }
+            max_duty_cyle: pwm.get_max_duty(),
+            motor: motor::Motor::l298(in1, in2, pwm),
+            direction: Direction::CW,
+        };
+
+        s.motor.cw();
+        s
     }
 
+    /// Can be positive and negative
     pub fn set_current(&mut self, amps: f32) {
         self.current_setpoint = amps;
     }
@@ -51,27 +78,61 @@ where
         self.duty_cyle
     }
 
+    pub fn voltage(&self) -> f32 {
+        self.voltage
+    }
+
     pub fn update(&mut self)
     {
-        let voltage_measured = self.adc_value as f32 / 255.0;
-        let current_measured = voltage_measured / self.shunt_resistance;
+        self.set_direction();
+        let mut current_measured = 0.0;
+        if self.adc_value > 0
+        {
+            self.voltage = self.adc_value as f32 / 255.0;
+            current_measured = self.voltage / self.shunt_resistance;
+        }
         self.calc_pwm(current_measured);
     }
 
-    fn calc_pwm(&mut self, current_measured: f32) {
-        let current_delta = self.current_setpoint - current_measured;
-        if current_delta > 0.01 {
-            //let duty_cyle = self.pwm.get_duty();
-            if self.duty_cyle != u16::min_value() {
-                self.duty_cyle -= 1;
-                self.pwm.set_duty(self.duty_cyle);
+    fn set_direction(&mut self)
+    {
+        if self.current_setpoint >= 0.0
+        { 
+            if self.direction  != Direction::CW {
+                self.motor.cw();
+                self.direction = Direction::CW;
             }
         }
-        if current_delta < 0.01 {
-            //let duty_cyle = self.pwm.get_duty();
-            if self.duty_cyle != u16::max_value() {
-                self.duty_cyle += 1;
-                self.pwm.set_duty(self.duty_cyle);
+        else
+        {
+            if self.direction != Direction::CCW {
+                self.motor.ccw();
+                self.direction = Direction::CCW;
+            }
+        }
+    }
+
+    fn calc_pwm(&mut self, current_measured: f32) 
+    {
+        const THRESHOLD: f32 = 0.01;
+        let current_delta = self.current_setpoint - current_measured;
+        if current_delta > THRESHOLD || current_delta < THRESHOLD
+        {
+            if current_delta > 0.0
+            {
+                if self.duty_cyle != self.max_duty_cyle 
+                {
+                    self.duty_cyle += 1;
+                    self.motor.duty(self.duty_cyle);
+                }
+            }
+            else
+            {
+                if self.duty_cyle != u16::min_value() 
+                {
+                    self.duty_cyle -= 1;
+                    self.motor.duty(self.duty_cyle);
+                }
             }
         }
     }

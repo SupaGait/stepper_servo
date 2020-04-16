@@ -9,6 +9,9 @@ opt-level = 's'
 lto = true
 #debug = true
 
+#[profile.dev.package."*"]
+#opt-level = 's'
+
 [profile.dev]
 opt-level = 1
 
@@ -25,6 +28,7 @@ panic-halt = "0.2.0"
 cortex-m-rtfm = "0.5.1"
 rotary-encoder-hal = "0.2.1"
 ssd1306 = "0.3.1"
+motor-driver = {path = "../motor-driver"}
 #embedded-graphics = "0.6.0"
 
 [dependencies.stm32f1xx-hal]

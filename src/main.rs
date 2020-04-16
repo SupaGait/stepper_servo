@@ -21,11 +21,16 @@ mod display;
 const BLINKING_LED_PERIOD: u32 = 8_000_000;
 const DISPLAY_REFRESH_PERIOD: u32 = 8_000_000/10;
 const CONTROL_REFRESH_PERIOD: u32 = 8_000_000/1_000;
+const SHUNT_RESISTANCE: f32 = 0.4;
 
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources<I2C> {
-        current_control: current_control::CurrentControl<stm32f1xx_hal::pwm::Pwm<hal::device::TIM2, stm32f1xx_hal::pwm::C1>>,
+        current_control: current_control::CurrentControl<
+            stm32f1xx_hal::pwm::Pwm<hal::device::TIM2, stm32f1xx_hal::pwm::C1>,
+            stm32f1xx_hal::gpio::gpiob::PB12<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,         
+            stm32f1xx_hal::gpio::gpiob::PB13<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>
+            >,
         position_control: position_control::PositionControl<stm32f1xx_hal::gpio::gpiob::PB10<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>, stm32f1xx_hal::gpio::gpiob::PB11<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>>,
         onboard_led: gpioc::PC13<Output<PushPull>>,
         display: display::Display<ssd1306::interface::i2c::I2cInterface<stm32f1xx_hal::i2c::BlockingI2c<hal::device::I2C1, (stm32f1xx_hal::gpio::gpiob::PB6<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>>>,
@@ -60,15 +65,19 @@ const APP: () = {
         let mut pwm_timer2 = timer2.pwm::<Tim2NoRemap, _, _, _>(
             pwm_pin, 
             &mut afio.mapr,
-            1.khz());
+            20.khz());
         pwm_timer2.enable();
 
-        // Control
+        // Current Control
+        let in1 = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+        let in2 = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
         let mut current_control = current_control::CurrentControl::new(
             adc1,
-            4.2,
-            pwm_timer2);
-        current_control.set_current(0.5);
+            SHUNT_RESISTANCE,
+            pwm_timer2,
+            in1,
+            in2);
+        current_control.set_current(0.1);
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input( &mut gpiob.crh);
@@ -121,7 +130,8 @@ const APP: () = {
     fn update_display(cx: update_display::Context) {
         cx.resources.display.update("Cyc", 0, cx.scheduled.elapsed().as_cycles());
         cx.resources.display.update("ADC", 2, cx.resources.current_control.adc_value() as u32);
-        cx.resources.display.update("Dut", 3, cx.resources.current_control.duty_cycle() as u32);
+        cx.resources.display.update("V", 3, cx.resources.current_control.voltage() as u32);
+        cx.resources.display.update("Dut", 4, cx.resources.current_control.duty_cycle() as u32);
 
         cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
     }
