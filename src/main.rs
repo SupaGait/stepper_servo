@@ -18,9 +18,10 @@ mod current_control;
 mod position_control;
 mod display;
 
-const BLINKING_LED_PERIOD: u32 = 8_000_000;
-const DISPLAY_REFRESH_PERIOD: u32 = 8_000_000/10;
-const CONTROL_REFRESH_PERIOD: u32 = 8_000_000/1_000;
+const DWT_FREQ: u32 =  8_000_000;
+const BLINKING_LED_PERIOD: u32 = DWT_FREQ/1;
+const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ/10;
+const CONTROL_REFRESH_PERIOD: u32 = DWT_FREQ/1_00;
 const SHUNT_RESISTANCE: f32 = 0.4;
 
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
@@ -47,11 +48,14 @@ const APP: () = {
         let mut gpiob: gpiob::Parts = peripherals.GPIOB.split(&mut rcc.apb2);
         let mut gpioc: gpioc::Parts = peripherals.GPIOC.split(&mut rcc.apb2);
 
-        let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
+        let clocks = rcc.cfgr
+            .adcclk(2.mhz())
+            .freeze(&mut flash.acr);
 
         //ADC
         let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
-        let adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
+        let mut adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
+        adc1.set_sample_time(adc::SampleTime::T_239);
         let mut adc1 = adc1.into_interrupt(ch0);
         adc1.enable();
         // Enable the monotonic timer CYCCNT
@@ -130,7 +134,8 @@ const APP: () = {
     fn update_display(cx: update_display::Context) {
         cx.resources.display.update("Cyc", 0, cx.scheduled.elapsed().as_cycles());
         cx.resources.display.update("ADC", 2, cx.resources.current_control.adc_value() as u32);
-        cx.resources.display.update("V", 3, cx.resources.current_control.voltage() as u32);
+        cx.resources.display.update_row_column("mV", 3, 0, (cx.resources.current_control.voltage() * 1000.0) as u32);
+        cx.resources.display.update_row_column("mA", 3, 8, (cx.resources.current_control.current() * 1000.0) as u32);
         cx.resources.display.update("Dut", 4, cx.resources.current_control.duty_cycle() as u32);
 
         cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();

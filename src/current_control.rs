@@ -21,8 +21,9 @@ where
     current_setpoint: f32,
     adc_value: u16,
     voltage: f32,
-    duty_cyle: u16,
-    max_duty_cyle: u16,
+    current: f32,
+    duty_cycle: u16,
+    max_duty_cycle: u16,
     motor: motor::Motor<IN1, IN2, PWM, L298>,
     direction: Direction,
 }
@@ -48,11 +49,14 @@ where
             current_setpoint: 0.0,
             adc_value: 0,
             voltage: 0.0,
-            duty_cyle: 0,
-            max_duty_cyle: pwm.get_max_duty(),
+            current: 0.0,
+            duty_cycle: 0,
+            max_duty_cycle: pwm.get_max_duty(),
             motor: motor::Motor::l298(in1, in2, pwm),
             direction: Direction::CW,
         };
+
+        //s.set_duty_cycle(250);
 
         s.motor.cw();
         s
@@ -75,23 +79,30 @@ where
     }
 
     pub fn duty_cycle(&self) -> u16 {
-        self.duty_cyle
+        self.duty_cycle
     }
 
     pub fn voltage(&self) -> f32 {
         self.voltage
     }
 
+    pub fn current(&self) -> f32 {
+        self.current
+    }
+
     pub fn update(&mut self)
     {
         self.set_direction();
-        let mut current_measured = 0.0;
         if self.adc_value > 0
         {
             self.voltage = self.adc_value as f32 / 255.0;
-            current_measured = self.voltage / self.shunt_resistance;
+            self.current = self.voltage / self.shunt_resistance;
         }
-        self.calc_pwm(current_measured);
+        else
+        {
+            self.current = 0.0;
+        }
+        self.calc_pwm();
     }
 
     fn set_direction(&mut self)
@@ -112,26 +123,29 @@ where
         }
     }
 
-    fn calc_pwm(&mut self, current_measured: f32) 
+    fn set_duty_cycle(&mut self, duty_cycle : u16) {
+        self.motor.duty(duty_cycle);
+        self.duty_cycle = duty_cycle;
+    }
+
+    fn calc_pwm(&mut self) 
     {
         const THRESHOLD: f32 = 0.01;
-        let current_delta = self.current_setpoint - current_measured;
+        let current_delta = self.current_setpoint - self.current;
         if current_delta > THRESHOLD || current_delta < THRESHOLD
         {
             if current_delta > 0.0
             {
-                if self.duty_cyle != self.max_duty_cyle 
+                if self.duty_cycle != self.max_duty_cycle 
                 {
-                    self.duty_cyle += 1;
-                    self.motor.duty(self.duty_cyle);
+                    self.set_duty_cycle(self.duty_cycle + 1);
                 }
             }
             else
             {
-                if self.duty_cyle != u16::min_value() 
+                if self.duty_cycle != u16::min_value() 
                 {
-                    self.duty_cyle -= 1;
-                    self.motor.duty(self.duty_cyle);
+                    self.set_duty_cycle(self.duty_cycle - 1);
                 }
             }
         }
