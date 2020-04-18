@@ -28,6 +28,7 @@ const SHUNT_RESISTANCE: f32 = 0.4;
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources<I2C> {
+        adc : hal::adc::AdcInt<hal::stm32::ADC1>,
         current_control: current_control::CurrentControl<
             stm32f1xx_hal::pwm::Pwm<hal::device::TIM2, stm32f1xx_hal::pwm::C1>,
             stm32f1xx_hal::gpio::gpiob::PB12<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,         
@@ -38,7 +39,7 @@ const APP: () = {
         display: display::Display<ssd1306::interface::i2c::I2cInterface<stm32f1xx_hal::i2c::BlockingI2c<hal::device::I2C1, (stm32f1xx_hal::gpio::gpiob::PB6<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>>>,
     }
 
-    #[init(schedule = [blink_led, update_display, control_loop])]
+    #[init(schedule = [blink_led, update_display, /*control_loop*/])]
     fn init(cx: init::Context)  -> init::LateResources {
         let peripherals = cx.device;
         let mut core = cx.core;
@@ -77,7 +78,6 @@ const APP: () = {
         let in1 = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
         let in2 = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
         let mut current_control = current_control::CurrentControl::new(
-            adc1,
             SHUNT_RESISTANCE,
             pwm_timer2,
             in1,
@@ -114,9 +114,10 @@ const APP: () = {
         let display = display::Display::new(i2c);
         cx.schedule.update_display(cx.start + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
 
-        cx.schedule.control_loop(cx.start + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
+        //cx.schedule.control_loop(cx.start + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
         
         init::LateResources {
+            adc: adc1,
             current_control,
             position_control,
             onboard_led,
@@ -142,17 +143,26 @@ const APP: () = {
         cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
     }
 
-    #[task(schedule = [control_loop], resources = [current_control, position_control])]
-    fn control_loop(cx: control_loop::Context) {
-        cx.resources.current_control.update();
-        cx.resources.position_control.update();
+    // #[task(schedule = [control_loop], resources = [current_control, position_control])]
+    // fn control_loop(cx: control_loop::Context) {
+    //     cx.resources.current_control.update();
+    //     cx.resources.position_control.update();
 
-        cx.schedule.control_loop(cx.scheduled + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
-    }
+    //     cx.schedule.control_loop(cx.scheduled + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
+    // }
 
-    #[task(binds = ADC1_2, resources = [current_control])]
+    #[task(binds = ADC1_2, resources = [adc, current_control])]
     fn handle_adc(cx: handle_adc::Context) {
-        cx.resources.current_control.handle_adc_interrupt();
+        let adc = &cx.resources.adc;
+        if adc.is_ready() {
+            let adc_value = adc.read_value();
+            let mut adc_voltage = 0.0;
+            if adc_value > 0
+            {
+                adc_voltage = 3.3 * (adc_value as f32 / adc.max_sample() as f32);
+            }
+            cx.resources.current_control.update(adc_value, adc_voltage);
+        }
     }
 
     #[idle(resources = [])]

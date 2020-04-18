@@ -6,8 +6,6 @@ use motor::ic::L298;
 
 use crate::pid::{PIDController, Controller};
 
-type AdcType = hal::adc::AdcInt<hal::stm32::ADC1>;
-
 #[derive(PartialEq)]
 enum Direction { CCW, CW, }
 
@@ -18,11 +16,9 @@ where
     IN1: OutputPin,
     IN2: OutputPin,
 {
-    adc: AdcType,
     shunt_resistance: f32,
     current_setpoint: f32,
     adc_value: u16,
-    adc_value_max: u16,
     voltage: f32,
     current: f32,
     duty_cycle: u16,
@@ -38,18 +34,15 @@ where
     IN2: OutputPin,
 {
     pub fn new(
-        adc: AdcType,
         shunt_resistance: f32,
         pwm: PWM,
         in1: IN1,
         in2: IN2,
     ) -> Self {
         let mut s = Self {
-            adc,
             shunt_resistance,
             current_setpoint: 0.0,
             adc_value: 0,
-            adc_value_max: 0,
             voltage: 0.0,
             current: 0.0,
             duty_cycle: 0,
@@ -57,8 +50,8 @@ where
             direction: Direction::CW,
             pid: PIDController::new(1.0, 0.0, 0.0),  // PID
         };
-        s.adc_value_max = s.adc.max_sample();
-        //s.set_duty_cycle(240);
+
+        s.set_duty_cycle(220);
         s.pid.set_limits(0.0, s.motor.get_max_duty() as f32);
         s.motor.cw();
         s
@@ -68,13 +61,6 @@ where
     pub fn set_current(&mut self, amps: f32) {
         self.current_setpoint = amps;
         self.pid.set_target(amps);
-    }
-
-    pub fn handle_adc_interrupt(&mut self)
-    {
-        if self.adc.is_ready() {
-            self.adc_value = self.adc.read_value();
-        }
     }
 
     pub fn adc_value(&self) -> u16 {
@@ -93,12 +79,14 @@ where
         self.current
     }
 
-    pub fn update(&mut self)
+    pub fn update(&mut self, adc_value: u16, adc_voltage: f32)
     {
+        self.adc_value = adc_value;
+        self.voltage = adc_voltage;
+
         self.set_direction();
         if self.adc_value > 0
         {
-            self.voltage = 3.3 * (self.adc_value as f32 / self.adc_value_max as f32) ;
             self.current = self.voltage / self.shunt_resistance;
         }
         else
