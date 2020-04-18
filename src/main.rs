@@ -17,6 +17,7 @@ use cortex_m::asm::nop;
 mod current_control;
 mod position_control;
 mod display;
+mod pid;
 
 const DWT_FREQ: u32 =  8_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ/1;
@@ -81,7 +82,7 @@ const APP: () = {
             pwm_timer2,
             in1,
             in2);
-        current_control.set_current(0.1);
+        current_control.set_current(0.100 );
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input( &mut gpiob.crh);

@@ -4,6 +4,8 @@ use embedded_hal::digital::v2::OutputPin;
 use motor_driver as motor;
 use motor::ic::L298;
 
+use crate::pid::{PIDController, Controller};
+
 type AdcType = hal::adc::AdcInt<hal::stm32::ADC1>;
 
 #[derive(PartialEq)]
@@ -20,12 +22,13 @@ where
     shunt_resistance: f32,
     current_setpoint: f32,
     adc_value: u16,
+    adc_value_max: u16,
     voltage: f32,
     current: f32,
     duty_cycle: u16,
-    max_duty_cycle: u16,
     motor: motor::Motor<IN1, IN2, PWM, L298>,
     direction: Direction,
+    pid: PIDController,
 }
 
 impl<PWM, IN1, IN2> CurrentControl<PWM, IN1, IN2>
@@ -41,23 +44,22 @@ where
         in1: IN1,
         in2: IN2,
     ) -> Self {
-
-
         let mut s = Self {
             adc,
             shunt_resistance,
             current_setpoint: 0.0,
             adc_value: 0,
+            adc_value_max: 0,
             voltage: 0.0,
             current: 0.0,
             duty_cycle: 0,
-            max_duty_cycle: pwm.get_max_duty(),
             motor: motor::Motor::l298(in1, in2, pwm),
             direction: Direction::CW,
+            pid: PIDController::new(1.0, 0.0, 0.0),  // PID
         };
-
-        //s.set_duty_cycle(250);
-
+        s.adc_value_max = s.adc.max_sample();
+        //s.set_duty_cycle(240);
+        s. .set_limits(0.0, s.motor.get_max_duty() as f32);
         s.motor.cw();
         s
     }
@@ -65,6 +67,7 @@ where
     /// Can be positive and negative
     pub fn set_current(&mut self, amps: f32) {
         self.current_setpoint = amps;
+        self.pid.set_target(amps);
     }
 
     pub fn handle_adc_interrupt(&mut self)
@@ -95,14 +98,14 @@ where
         self.set_direction();
         if self.adc_value > 0
         {
-            self.voltage = self.adc_value as f32 / 255.0;
+            self.voltage = 3.3 * (self.adc_value as f32 / self.adc_value_max as f32) ;
             self.current = self.voltage / self.shunt_resistance;
         }
         else
         {
             self.current = 0.0;
         }
-        self.calc_pwm();
+        //self.calc_pwm();
     }
 
     fn set_direction(&mut self)
@@ -130,24 +133,8 @@ where
 
     fn calc_pwm(&mut self) 
     {
-        const THRESHOLD: f32 = 0.01;
-        let current_delta = self.current_setpoint - self.current;
-        if current_delta > THRESHOLD || current_delta < THRESHOLD
-        {
-            if current_delta > 0.0
-            {
-                if self.duty_cycle != self.max_duty_cycle 
-                {
-                    self.set_duty_cycle(self.duty_cycle + 1);
-                }
-            }
-            else
-            {
-                if self.duty_cycle != u16::min_value() 
-                {
-                    self.set_duty_cycle(self.duty_cycle - 1);
-                }
-            }
-        }
+        const DT: f32 = (1/(8_000_000/1_00)) as f32;
+        let pwm_value = self.pid.update(self.current, DT);
+        self.set_duty_cycle(pwm_value as u16);
     }
 }
