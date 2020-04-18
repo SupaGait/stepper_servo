@@ -59,7 +59,7 @@ where
         };
         s.adc_value_max = s.adc.max_sample();
         //s.set_duty_cycle(240);
-        s. .set_limits(0.0, s.motor.get_max_duty() as f32);
+        s.pid.set_limits(0.0, s.motor.get_max_duty() as f32);
         s.motor.cw();
         s
     }
