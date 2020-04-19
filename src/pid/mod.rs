@@ -16,9 +16,9 @@
 
 // FIXME: it may be worth to explore http://de.mathworks.com/help/simulink/slref/pidcontroller.html
 //        for additional features/inspiration
-pub mod util;
+use num_traits;
 
-use core::f32;
+pub mod util;
 
 /// A generic controller interface.
 ///
@@ -27,21 +27,21 @@ use core::f32;
 ///
 /// Many controllers possess a set of adjustable parameters as well as a set
 /// of input-value dependant state variables.
-pub trait Controller {
+pub trait Controller<T> {
     /// Record a measurement from the plant.
     ///
     /// Records a new values. `delta_t` is the time since the last update in
     /// seconds.
-    fn update(&mut self, value: f32, delta_t: f32) -> f32;
+    fn update(&mut self, value: T, delta_t: T) -> T;
 
     /// Adjust set target for the plant.
     ///
     /// The controller will usually try to adjust its output (from `update`) in
     /// a way that results in the plant approaching `target`.
-    fn set_target(&mut self, target: f32);
+    fn set_target(&mut self, target: T);
 
     /// Retrieve target value.
-    fn target(&self) -> f32;
+    fn target(&self) -> T;
 
     /// Reset internal state.
     ///
@@ -85,61 +85,62 @@ pub enum DerivativeMode {
 ///
 /// `d_mode` The `DerivativeMode`, the default is `OnMeasurement`.
 #[derive(Debug, Clone)]
-pub struct PIDController {
+pub struct PIDController<T> {
     /// Proportional gain
-    pub p_gain: f32,
+    pub p_gain: T,
 
     /// Integral gain
-    pub i_gain: f32,
+    pub i_gain: T,
 
     /// Differential gain,
-    pub d_gain: f32,
+    pub d_gain: T,
 
-    target: f32,
+    target: T,
 
     // Integral range limits
-    pub i_min: f32,
-    pub i_max: f32,
+    pub i_min: T,
+    pub i_max: T,
 
     // Output range limits
-    pub out_min: f32,
-    pub out_max: f32,
+    pub out_min: T,
+    pub out_max: T,
 
     pub d_mode: DerivativeMode,
 
     // The PIDs internal state. All other attributes are configuration values
-    err_sum: f32,
-    prev_value: f32,
-    prev_error: f32,
+    err_sum: T,
+    prev_value: Option::<T>,
+    prev_error: Option::<T>,
 }
 
-impl PIDController {
+impl<T > PIDController<T> 
+    where T: num_traits::Bounded + num_traits::identities::Zero + Copy
+{
     /// Creates a new PID Controller.
-    pub fn new(p_gain: f32, i_gain: f32, d_gain: f32) -> PIDController {
+    pub fn new(p_gain: T, i_gain: T, d_gain: T) -> PIDController<T> {
         PIDController{
             p_gain: p_gain,
             i_gain: i_gain,
             d_gain: d_gain,
 
-            target: 0.0,
+            target: T::zero(),
 
-            err_sum: 0.0,
-            prev_value: f32::NAN,
-            prev_error: f32::NAN,
+            err_sum: T::zero(),
+            prev_value: None,
+            prev_error: None,
 
-            i_min:  f32::INFINITY,
-            i_max: f32::INFINITY,
+            i_min:  T::max_value(),
+            i_max: T::max_value(),
 
-            out_min:  f32::INFINITY,
-            out_max: f32::INFINITY,
+            out_min:  T::max_value(),
+            out_max: T::max_value(),
 
             d_mode: DerivativeMode::OnMeasurement,
         }
     }
-
     /// Convenience function to set `i_min`/`i_max` and `out_min`/`out_max`
     /// to the same values simultaneously.
-    pub fn set_limits(&mut self, min: f32, max: f32) {
+    pub fn set_limits(&mut self, min: T, max: T) {
         self.i_min = min;
         self.i_max = max;
         self.out_min = min;
@@ -147,16 +148,22 @@ impl PIDController {
     }
 }
 
-impl Controller for PIDController {
-    fn set_target(&mut self, target: f32) {
+impl<T> Controller<T> for PIDController<T> 
+where
+    T:  num_traits::CheckedAdd + num_traits::CheckedSub + 
+        num_traits::CheckedMul + num_traits::CheckedDiv +
+        num_traits::identities::Zero + PartialOrd +
+        Copy
+{
+    fn set_target(&mut self, target: T) {
         self.target = target;
     }
 
-    fn target(&self) -> f32 {
+    fn target(&self) -> T {
         self.target
     }
 
-    fn update(&mut self, value: f32, delta_t: f32) -> f32 {
+    fn update(&mut self, value: T, delta_t: T) -> T {
         let error = self.target - value;
 
         // PROPORTIONAL
@@ -170,41 +177,42 @@ impl Controller for PIDController {
         let i_term = self.err_sum;
 
         // DIFFERENTIAL
-        let d_term = if self.prev_value.is_nan() || self.prev_error.is_nan() {
-            // we have no previous values, so skip the derivative calculation
-            0.0
-        } else {
+        let d_term = if let (Some(prev_value) ,Some(prev_error)) = (self.prev_value, self.prev_error) {
             match self.d_mode {
                 DerivativeMode::OnMeasurement => {
                     // we use -delta_v instead of delta_error to reduce "derivative kick",
                     // see http://brettbeauregard.com/blog/2011/04/improving-the-beginner%E2%80%99s-pid-derivative-kick/
-                    self.d_gain * (self.prev_value - value) / delta_t
+                    self.d_gain * (prev_value - value) / delta_t
                 },
                 DerivativeMode::OnError => {
-                    self.d_gain * (error - self.prev_error) / delta_t
+                    self.d_gain * (error - prev_error) / delta_t
                 }
-            }
+            }            
+        }
+        else {
+            T::zero()
         };
 
         // store previous values
-        self.prev_value = value;
-        self.prev_error = error;
+        self.prev_value = Some(value);
+        self.prev_error = Some(error);
 
-        util::limit_range(
-            self.out_min, self.out_max,
-            p_term + d_term + i_term
-        )
+        p_term + d_term + i_term
+        // util::limit_range(
+        //     self.out_min, self.out_max,
+        //     p_term + d_term + i_term
+        // )
     }
 
     fn reset(&mut self) {
-        self.prev_value = f32::NAN;
-        self.prev_error = f32::NAN;
+        self.prev_value = None;
+        self.prev_error = None;
 
         // FIXME: http://brettbeauregard.com/blog/2011/04/improving-the-beginner
         //               %E2%80%99s-pid-initialization/
         //        suggests that this should not be there. however, it may miss
         //        the fact that input and output can be two completely
         //        different domains
-        self.err_sum = 0.0;
+        self.err_sum = T::zero();
     }
 }

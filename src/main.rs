@@ -12,7 +12,7 @@ use hal::{
 };
 use rtfm::cyccnt::{Instant, U32Ext};
 use cortex_m::asm::nop;
-use embedded_hal::digital::v2::OutputPin;
+//use embedded_hal::digital::v2::OutputPin;
 
 // Local modules
 mod current_control;
@@ -23,7 +23,7 @@ mod pid;
 const DWT_FREQ: u32 =  8_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ/1;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ/10;
-const SHUNT_RESISTANCE: f32 = 0.4;
+const SHUNT_RESISTANCE: u32 = 400; //mOhms
 
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
@@ -84,7 +84,7 @@ const APP: () = {
             pwm_timer2,
             in1,
             in2);
-        current_control.set_current(0.100);
+        current_control.set_current(100);
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input( &mut gpiob.crh);
@@ -141,8 +141,8 @@ const APP: () = {
     fn update_display(cx: update_display::Context) {
         cx.resources.display.update("Cyc", 0, cx.scheduled.elapsed().as_cycles());
         cx.resources.display.update("ADC", 2, cx.resources.current_control.adc_value() as u32);
-        cx.resources.display.update_row_column("mV", 3, 0, (cx.resources.current_control.voltage() * 1000.0) as u32);
-        cx.resources.display.update_row_column("mA", 3, 8, (cx.resources.current_control.current() * 1000.0) as u32);
+        cx.resources.display.update_row_column("mV", 3, 0, cx.resources.current_control.voltage());
+        cx.resources.display.update_row_column("mA", 3, 8, cx.resources.current_control.current());
         cx.resources.display.update("Dut", 4, cx.resources.current_control.duty_cycle() as u32);
 
         cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
@@ -150,17 +150,17 @@ const APP: () = {
 
     #[task(binds = ADC1_2, resources = [adc, current_control, prev_time, trigger_pin])]
     fn handle_adc(cx: handle_adc::Context) {
-        cx.resources.trigger_pin.set_high().unwrap();
+        cx.resources.trigger_pin.toggle().unwrap();
         let adc = &cx.resources.adc;
         if adc.is_ready() {
-            let adc_value = adc.read_value();
-            let mut adc_voltage = 0.0;
+            let adc_value = adc.read_value() as u32;
+            let mut adc_voltage = 0;
             if adc_value > 0
             {
-                adc_voltage = 3.3 * (adc_value as f32 / adc.max_sample() as f32);
+                adc_voltage = (3300 * adc_value) / adc.max_sample() as u32;
             }
 
-            let duration = cx.start.duration_since(*cx.resources.prev_time).as_cycles() as f32 / DWT_FREQ as f32;
+            let duration = cx.start.duration_since(*cx.resources.prev_time).as_cycles();
             cx.resources.current_control.update(duration, adc_value, adc_voltage);
             *cx.resources.prev_time = cx.start;
         }

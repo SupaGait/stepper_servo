@@ -30,12 +30,12 @@ rotary-encoder-hal = "0.2.1"
 ssd1306 = "0.3.1"
 motor-driver = {path = "../motor-driver"}
 integer-sqrt = "0.1.3"
-#embedded-graphics = "0.6.0"
 
 [dependencies.stm32f1xx-hal]
 #version = "0.5.3"
 features = ["rt", "stm32f103", "medium"]
 path = "../stm32f1xx-hal"
 
-# Gives us access to the STM32F1 registers
-# stm32f1 = {version = "0.6.0", features = ["stm32f103", "rt"]}
+[dependencies.num-traits]
+version = "0.2.11"
+default-features = false
