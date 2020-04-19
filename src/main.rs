@@ -10,8 +10,9 @@ use hal::{
     timer::{Tim2NoRemap, Timer},
     i2c::{BlockingI2c, DutyCycle, Mode},
 };
-use rtfm::cyccnt::{U32Ext};
+use rtfm::cyccnt::{Instant, U32Ext};
 use cortex_m::asm::nop;
+use embedded_hal::digital::v2::OutputPin;
 
 // Local modules
 mod current_control;
@@ -22,13 +23,12 @@ mod pid;
 const DWT_FREQ: u32 =  8_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ/1;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ/10;
-const CONTROL_REFRESH_PERIOD: u32 = DWT_FREQ/1_00;
 const SHUNT_RESISTANCE: f32 = 0.4;
 
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources<I2C> {
-        adc : hal::adc::AdcInt<hal::stm32::ADC1>,
+        adc: hal::adc::AdcInt<hal::stm32::ADC1>,
         current_control: current_control::CurrentControl<
             stm32f1xx_hal::pwm::Pwm<hal::device::TIM2, stm32f1xx_hal::pwm::C1>,
             stm32f1xx_hal::gpio::gpiob::PB12<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,         
@@ -37,6 +37,8 @@ const APP: () = {
         position_control: position_control::PositionControl<stm32f1xx_hal::gpio::gpiob::PB10<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>, stm32f1xx_hal::gpio::gpiob::PB11<stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>>>,
         onboard_led: gpioc::PC13<Output<PushPull>>,
         display: display::Display<ssd1306::interface::i2c::I2cInterface<stm32f1xx_hal::i2c::BlockingI2c<hal::device::I2C1, (stm32f1xx_hal::gpio::gpiob::PB6<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>, stm32f1xx_hal::gpio::gpiob::PB7<stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>>)>>>,
+        prev_time: Instant,
+        trigger_pin: gpioa::PA4<Output<PushPull>>,
     }
 
     #[init(schedule = [blink_led, update_display, /*control_loop*/])]
@@ -82,7 +84,7 @@ const APP: () = {
             pwm_timer2,
             in1,
             in2);
-        current_control.set_current(0.100 );
+        current_control.set_current(0.100);
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input( &mut gpiob.crh);
@@ -114,7 +116,8 @@ const APP: () = {
         let display = display::Display::new(i2c);
         cx.schedule.update_display(cx.start + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
 
-        //cx.schedule.control_loop(cx.start + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
+        // DEBUG
+        let trigger_pin = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
         
         init::LateResources {
             adc: adc1,
@@ -122,6 +125,8 @@ const APP: () = {
             position_control,
             onboard_led,
             display,
+            prev_time: cx.start,
+            trigger_pin,
         }
     }
 
@@ -143,16 +148,9 @@ const APP: () = {
         cx.schedule.update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).unwrap();
     }
 
-    // #[task(schedule = [control_loop], resources = [current_control, position_control])]
-    // fn control_loop(cx: control_loop::Context) {
-    //     cx.resources.current_control.update();
-    //     cx.resources.position_control.update();
-
-    //     cx.schedule.control_loop(cx.scheduled + CONTROL_REFRESH_PERIOD.cycles()).unwrap();
-    // }
-
-    #[task(binds = ADC1_2, resources = [adc, current_control])]
+    #[task(binds = ADC1_2, resources = [adc, current_control, prev_time, trigger_pin])]
     fn handle_adc(cx: handle_adc::Context) {
+        cx.resources.trigger_pin.set_high().unwrap();
         let adc = &cx.resources.adc;
         if adc.is_ready() {
             let adc_value = adc.read_value();
@@ -161,7 +159,10 @@ const APP: () = {
             {
                 adc_voltage = 3.3 * (adc_value as f32 / adc.max_sample() as f32);
             }
-            cx.resources.current_control.update(adc_value, adc_voltage);
+
+            let duration = cx.start.duration_since(*cx.resources.prev_time).as_cycles() as f32 / DWT_FREQ as f32;
+            cx.resources.current_control.update(duration, adc_value, adc_voltage);
+            *cx.resources.prev_time = cx.start;
         }
     }
 
