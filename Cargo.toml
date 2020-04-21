@@ -28,12 +28,14 @@ panic-halt = "0.2.0"
 cortex-m-rtfm = "0.5.1"
 rotary-encoder-hal = "0.2.1"
 ssd1306 = "0.3.1"
-motor-driver = {path = "../motor-driver"}
+l298n = "0.1.3"
 integer-sqrt = "0.1.3"
+
 
 [dependencies.stm32f1xx-hal]
 #version = "0.5.3"
 features = ["rt", "stm32f103", "medium"]
+git = "https://github.com/SupaGait/stm32f1xx-hal.git"
 path = "../stm32f1xx-hal"
 
 [dependencies.num-traits]

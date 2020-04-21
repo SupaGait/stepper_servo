@@ -5,9 +5,6 @@
         },
         {
             "path": "..\\stm32f1xx-hal"
-        },
-        {
-            "path": "..\\motor-driver"
         }
     ],
     "settings": {
