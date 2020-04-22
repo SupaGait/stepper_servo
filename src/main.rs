@@ -2,18 +2,19 @@
 #![no_main]
 
 use cortex_m::asm::nop;
-use hal::{
-    adc, device,
-    gpio::{gpioa, gpiob, gpioc, Output, PushPull},
-    i2c::{BlockingI2c, DutyCycle, Mode},
-    prelude::*,
-    pwm::Channel,
-    timer::{Tim2NoRemap, Timer},
-};
 use panic_halt as _;
 use rtfm::cyccnt::{Instant, U32Ext};
-use stm32f1xx_hal as hal;
-//use embedded_hal::digital::v2::OutputPin;
+use stm32f1xx_hal::{
+    adc, device,
+    gpio::{gpioa, gpiob, gpioc},
+    gpio::{Alternate, Input, OpenDrain, Output, PullUp, PushPull},
+    i2c::{BlockingI2c, DutyCycle, Mode},
+    prelude::*,
+    pwm,
+    pwm::Channel,
+    serial::{Config, Rx, Serial, Tx},
+    timer::{Tim2NoRemap, Timer},
+};
 
 // Local modules
 mod current_control;
@@ -26,43 +27,37 @@ const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 1;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
 const SHUNT_RESISTANCE: u32 = 400; //mOhms
 
+// Types
+type AdcType = adc::AdcInt<device::ADC1>;
+type CurrentControlType = current_control::CurrentControl<
+    pwm::PwmChannel<device::TIM2, stm32f1xx_hal::pwm::C1>,
+    gpiob::PB12<Output<PushPull>>,
+    gpiob::PB13<Output<PushPull>>,
+>;
+type PositionControlType =
+    position_control::PositionControl<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
+type DisplayType = display::Display<
+    ssd1306::interface::i2c::I2cInterface<
+        BlockingI2c<
+            device::I2C1,
+            (
+                gpiob::PB6<Alternate<OpenDrain>>,
+                gpiob::PB7<Alternate<OpenDrain>>,
+            ),
+        >,
+    >,
+>;
+type Usart1Type = (Tx<device::USART1>, Rx<device::USART1>);
+
 #[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources {
-        adc: hal::adc::AdcInt<hal::stm32::ADC1>,
-        current_control: current_control::CurrentControl<
-            stm32f1xx_hal::pwm::PwmChannel<device::TIM2, stm32f1xx_hal::pwm::C1>,
-            stm32f1xx_hal::gpio::gpiob::PB12<
-                stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>,
-            >,
-            stm32f1xx_hal::gpio::gpiob::PB13<
-                stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>,
-            >,
-        >,
-        position_control: position_control::PositionControl<
-            stm32f1xx_hal::gpio::gpiob::PB10<
-                stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>,
-            >,
-            stm32f1xx_hal::gpio::gpiob::PB11<
-                stm32f1xx_hal::gpio::Input<stm32f1xx_hal::gpio::PullUp>,
-            >,
-        >,
+        adc: AdcType,
+        current_control: CurrentControlType,
+        position_control: PositionControlType,
         onboard_led: gpioc::PC13<Output<PushPull>>,
-        display: display::Display<
-            ssd1306::interface::i2c::I2cInterface<
-                stm32f1xx_hal::i2c::BlockingI2c<
-                    hal::device::I2C1,
-                    (
-                        stm32f1xx_hal::gpio::gpiob::PB6<
-                            stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-                        >,
-                        stm32f1xx_hal::gpio::gpiob::PB7<
-                            stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-                        >,
-                    ),
-                >,
-            >,
-        >,
+        display: DisplayType,
+        usart1: Usart1Type,
         prev_time: Instant,
         trigger_pin: gpioa::PA4<Output<PushPull>>,
     }
@@ -139,6 +134,20 @@ const APP: () = {
             .update_display(cx.start + DISPLAY_REFRESH_PERIOD.cycles())
             .unwrap();
 
+        // USART1
+        let tx = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
+        let rx = gpioa.pa10;
+        let mut usart1 = Serial::usart1(
+            peripherals.USART1,
+            (tx, rx),
+            &mut afio.mapr,
+            Config::default().baudrate(9600.bps()),
+            clocks,
+            &mut rcc.apb2,
+        )
+        .split();
+        usart1.1.listen();
+
         // DEBUG
         let trigger_pin = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
 
@@ -148,6 +157,7 @@ const APP: () = {
             position_control,
             onboard_led,
             display,
+            usart1,
             prev_time: cx.start,
             trigger_pin,
         }
@@ -187,8 +197,8 @@ const APP: () = {
 
     #[task(binds = ADC1_2, resources = [adc, current_control, prev_time, trigger_pin])]
     fn handle_adc(cx: handle_adc::Context) {
-        cx.resources.trigger_pin.toggle().unwrap();
-        let adc = &cx.resources.adc;
+        //cx.resources.trigger_pin.toggle().unwrap();
+        let adc: &AdcType = &cx.resources.adc;
         if adc.is_ready() {
             let adc_value = adc.read_value() as u32;
             let mut adc_voltage = 0;
@@ -202,6 +212,12 @@ const APP: () = {
                 .update(duration, adc_value, adc_voltage);
             *cx.resources.prev_time = cx.start;
         }
+    }
+
+    #[task(binds = USART1, resources = [usart1])]
+    fn handle_usart1(cx: handle_usart1::Context) {
+        let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
+        let _data = rx.read().unwrap();
     }
 
     #[idle(resources = [])]

@@ -48,15 +48,11 @@ where
             duty_cycle: 0,
             motor: l298n::Motor::new(in1, in2, pwm),
             direction: Direction::CW,
-            //pid: PIDController::new(50.0, 1.0, 0.0),  // PID
-            pid: PIDController::new(80, 0, 0), // PID
+            pid: PIDController::new(60, 1, 0), // PID
 
             current_buffer: [0; CURRENT_BUFFER_SIZE],
             buffer_index: 0,
         };
-
-        //s.set_duty_cycle(220);
-        //s.pid.set_limits(0.0, s.motor.get_max_duty() as f32);
         s.pid.set_limits(0, 230);
         s.motor.forward();
         s
@@ -95,9 +91,6 @@ where
             current = (self.voltage * 1000) / self.shunt_resistance; // uV / mOhm = mA
         }
         self.average_current(current, dt);
-        //self.current = current;
-
-        //self.calc_pwm(dt);
     }
 
     fn average_current(&mut self, current: u32, dt: u32) {
