@@ -1,9 +1,17 @@
 #![no_std]
 #![no_main]
 
+// Local modules
+mod current_control;
+mod display;
+mod pid;
+mod position_control;
+
+// Imports
 use cortex_m::asm::nop;
 use panic_halt as _;
 use rtfm::cyccnt::{Instant, U32Ext};
+use stepper_servo_lib::serial_commands::SerialCommands;
 use stm32f1xx_hal::{
     adc, device,
     gpio::{gpioa, gpiob, gpioc},
@@ -15,12 +23,6 @@ use stm32f1xx_hal::{
     serial::{Config, Rx, Serial, Tx},
     timer::{Tim2NoRemap, Timer},
 };
-
-// Local modules
-mod current_control;
-mod display;
-mod pid;
-mod position_control;
 
 const DWT_FREQ: u32 = 8_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 1;
@@ -58,6 +60,7 @@ const APP: () = {
         onboard_led: gpioc::PC13<Output<PushPull>>,
         display: DisplayType,
         usart1: Usart1Type,
+        serial_commands: SerialCommands,
         prev_time: Instant,
         trigger_pin: gpioa::PA4<Output<PushPull>>,
     }
@@ -158,6 +161,7 @@ const APP: () = {
             onboard_led,
             display,
             usart1,
+            serial_commands: SerialCommands::new(),
             prev_time: cx.start,
             trigger_pin,
         }
@@ -214,10 +218,13 @@ const APP: () = {
         }
     }
 
-    #[task(binds = USART1, resources = [usart1])]
+    #[task(binds = USART1, resources = [usart1, serial_commands])]
     fn handle_usart1(cx: handle_usart1::Context) {
         let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
-        let _data = rx.read().unwrap();
+        let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
+
+        let data = rx.read().unwrap();
+        serial_commands.add_character(data);
     }
 
     #[idle(resources = [])]

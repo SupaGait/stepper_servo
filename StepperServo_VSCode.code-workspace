@@ -1,10 +1,11 @@
 {
     "folders": [
         {
+            "name": "stepperServo",
             "path": "."
         },
         {
-            "path": "..\\stm32f1xx-hal"
+            "path": "..\\stepper_servo_lib"
         }
     ],
     "settings": {

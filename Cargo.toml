@@ -1,5 +1,5 @@
 [package]
-name = "stm32_blink"
+name = "stepper_servo"
 version = "0.1.0"
 authors = ["Supagait <gklomphaar@hotmail.com>"]
 edition = "2018"
@@ -14,6 +14,7 @@ lto = true
 
 [profile.dev]
 opt-level = 1
+#lto = true
 
 [dependencies]
 embedded-hal = "0.2.3"
@@ -37,6 +38,10 @@ integer-sqrt = "0.1.3"
 features = ["rt", "stm32f103", "medium"]
 git = "https://github.com/SupaGait/stm32f1xx-hal.git"
 #path = "../stm32f1xx-hal"
+
+[dependencies.stepper_servo_lib]
+#git = "https://github.com/SupaGait/stepper_servo_lib.git"
+path = "../stepper_servo_lib"
 
 [dependencies.num-traits]
 version = "0.2.11"

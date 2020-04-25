@@ -11,9 +11,12 @@
             "servertype": "openocd",
             "device": "STM32F103C8T6",
             "cwd": "${workspaceRoot}",
-            "executable": "./target/thumbv7m-none-eabi/debug/stm32_blink",
+            "executable": "./target/thumbv7m-none-eabi/debug/stepper_servo",
             "svdFile": "${workspaceRoot}/STM32F103.svd",
-            "configFiles": ["interface/stlink.cfg", "target/stm32f1x.cfg"],
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32f1x.cfg"
+            ],
             "preLaunchTask": "build",
             "runToMain": true
         }

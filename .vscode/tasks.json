@@ -25,8 +25,8 @@
             "args": [
                 "--output-target",
                 "binary",
-                "./target/thumbv7m-none-eabi/debug/stm32_blink",
-                "./target/thumbv7m-none-eabi/debug/stm32_blink.bin"
+                "./target/thumbv7m-none-eabi/debug/stepper_servo",
+                "./target/thumbv7m-none-eabi/debug/stepper_servo.bin"
             ],
             "options": {
                 "cwd": "${workspaceRoot}",
@@ -42,7 +42,7 @@
                 "-c",
                 "SWD",
                 "-P",
-                "./target/thumbv7m-none-eabi/debug/stm32_blink.bin",
+                "./target/thumbv7m-none-eabi/debug/stepper_servo.bin",
                 "0x08000000",
                 "-rst"
             ],
