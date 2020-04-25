@@ -161,7 +161,7 @@ const APP: () = {
             onboard_led,
             display,
             usart1,
-            serial_commands: SerialCommands::new(),
+            serial_commands: SerialCommands::default(),
             prev_time: cx.start,
             trigger_pin,
         }
