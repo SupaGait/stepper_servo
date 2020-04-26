@@ -4,7 +4,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build",
+            "label": "build (debug)",
             "type": "shell",
             "command": "cargo",
             "args": [
@@ -19,7 +19,20 @@
             }
         },
         {
-            "label": "copy_binary",
+            "label": "build (release)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build",
+                "--release",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "build",
+        },
+        {
+            "label": "copy_binary (debug)",
             "type": "shell",
             "command": "arm-none-eabi-objcopy",
             "args": [
@@ -32,10 +45,26 @@
                 "cwd": "${workspaceRoot}",
             },
             "problemMatcher": [],
-            "dependsOn": "build"
+            "dependsOn": "build (debug)"
         },
         {
-            "label": "load_firmware",
+            "label": "copy_binary (release)",
+            "type": "shell",
+            "command": "arm-none-eabi-objcopy",
+            "args": [
+                "--output-target",
+                "binary",
+                "./target/thumbv7m-none-eabi/release/stepper_servo",
+                "./target/thumbv7m-none-eabi/release/stepper_servo.bin"
+            ],
+            "options": {
+                "cwd": "${workspaceRoot}",
+            },
+            "problemMatcher": [],
+            "dependsOn": "build (release)"
+        },
+        {
+            "label": "load_firmware (debug)",
             "type": "shell",
             "command": "C:/Program Files (x86)/STMicroelectronics/STM32 ST-LINK Utility/ST-LINK Utility/ST-LINK_CLI.exe",
             "args": [
@@ -54,7 +83,26 @@
                 "isDefault": true
             },
             "problemMatcher": [],
-            "dependsOn": "copy_binary"
+            "dependsOn": "copy_binary (debug)"
+        }
+        {
+            "label": "load_firmware (release)",
+            "type": "shell",
+            "command": "C:/Program Files (x86)/STMicroelectronics/STM32 ST-LINK Utility/ST-LINK Utility/ST-LINK_CLI.exe",
+            "args": [
+                "-c",
+                "SWD",
+                "-P",
+                "./target/thumbv7m-none-eabi/release/stepper_servo.bin",
+                "0x08000000",
+                "-rst"
+            ],
+            "options": {
+                "cwd": "${workspaceRoot}",
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "dependsOn": "copy_binary (release)"
         }
     ]
 }

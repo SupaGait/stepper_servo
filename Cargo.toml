@@ -6,7 +6,7 @@ edition = "2018"
 
 [profile.release]
 opt-level = 's'
-lto = true
+#lto = true
 #debug = true
 
 #[profile.dev.package."*"]
