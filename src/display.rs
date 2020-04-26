@@ -1,6 +1,6 @@
+use core::fmt::Write as _;
 use embedded_hal::blocking::i2c::Write;
 use ssd1306::{interface::i2c::I2cInterface, mode::TerminalMode, Builder};
-use core::fmt::Write as _;
 
 pub struct Display<DI> {
     display: TerminalMode<DI>,
@@ -23,7 +23,6 @@ where
     }
 
     pub fn update_row_column(&mut self, label: &str, row: u8, column: u8, value: u32) {
-
         self.display.set_position(column, row).ok();
         write!(self.display, "{}:{:<4}", label, value).expect("Can't write");
     }
