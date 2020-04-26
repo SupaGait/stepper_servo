@@ -10,7 +10,8 @@ mod position_control;
 // Imports
 use cortex_m::asm::nop;
 use panic_halt as _;
-use rtfm::cyccnt::{Instant, U32Ext};
+use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
+use rtfm::Monotonic;
 use stepper_servo_lib::serial_commands::SerialCommands;
 use stm32f1xx_hal::{
     adc, device,
@@ -63,6 +64,9 @@ const APP: () = {
         serial_commands: SerialCommands,
         prev_time: Instant,
         trigger_pin: gpioa::PA4<Output<PushPull>>,
+        total_sleep_time: Duration,
+        previous_time: Instant,
+        processor_usage: u32,
     }
 
     #[init(schedule = [blink_led, update_display])]
@@ -164,11 +168,28 @@ const APP: () = {
             serial_commands: SerialCommands::default(),
             prev_time: cx.start,
             trigger_pin,
+            total_sleep_time: Duration::from_cycles(0),
+            previous_time: CYCCNT::zero(),
+            processor_usage: 0,
         }
     }
 
-    #[task(schedule = [blink_led], resources = [onboard_led])]
+    #[task(schedule = [blink_led], resources = [onboard_led, total_sleep_time, previous_time, processor_usage])]
     fn blink_led(cx: blink_led::Context) {
+        // Calc elapsed time
+        let current_time = Instant::now();
+        let elapsed_time = current_time
+            .duration_since(*cx.resources.previous_time)
+            .as_cycles();
+
+        *cx.resources.processor_usage =
+            100 - (100 * cx.resources.total_sleep_time.as_cycles()) / elapsed_time;
+
+        // Prepare for next iteration.
+        *cx.resources.total_sleep_time = Duration::from_cycles(0);
+        *cx.resources.previous_time = current_time;
+
+        // Blink
         cx.resources.onboard_led.toggle().unwrap();
 
         cx.schedule
@@ -176,7 +197,7 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(schedule = [update_display], resources = [display, current_control])]
+    #[task(schedule = [update_display], resources = [display, current_control, processor_usage])]
     fn update_display(cx: update_display::Context) {
         cx.resources
             .display
@@ -193,6 +214,9 @@ const APP: () = {
         cx.resources
             .display
             .update("Dut", 4, cx.resources.current_control.duty_cycle() as u32);
+        cx.resources
+            .display
+            .update("Cpu", 7, *cx.resources.processor_usage);
 
         cx.schedule
             .update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles())
@@ -227,10 +251,19 @@ const APP: () = {
         serial_commands.add_character(data);
     }
 
-    #[idle(resources = [])]
-    fn idle(_cx: idle::Context) -> ! {
+    #[idle(resources = [total_sleep_time])]
+    fn idle(mut cx: idle::Context) -> ! {
         loop {
             nop();
+
+            cortex_m::interrupt::free(|_| {
+                let sleep = Instant::now();
+                rtfm::export::wfi();
+
+                cx.resources.total_sleep_time.lock(|total_time| {
+                    *total_time += Instant::now().duration_since(sleep);
+                });
+            })
         }
     }
 
