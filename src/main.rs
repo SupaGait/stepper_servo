@@ -12,7 +12,7 @@ use cortex_m::asm::nop;
 use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
 use rtfm::Monotonic;
-use stepper_servo_lib::serial_commands::SerialCommands;
+use stepper_servo_lib::serial_commands::{Command, SerialCommands};
 use stm32f1xx_hal::{
     adc, device,
     gpio::{gpioa, gpiob, gpioc},
@@ -242,13 +242,24 @@ const APP: () = {
         }
     }
 
-    #[task(binds = USART1, resources = [usart1, serial_commands])]
+    #[task(binds = USART1, resources = [usart1, serial_commands, current_control])]
     fn handle_usart1(cx: handle_usart1::Context) {
         let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
         let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
 
         let data = rx.read().unwrap();
         serial_commands.add_character(data);
+
+        let current_control = cx.resources.current_control;
+        match serial_commands.get_command() {
+            Some(Command::Stop) => (),
+            Some(Command::Left { speed: _ }) => (),
+            Some(Command::Right { speed: _ }) => (),
+            Some(Command::P(value)) => current_control.set_p_value(value),
+            Some(Command::I(value)) => current_control.set_i_value(value),
+            Some(Command::D(value)) => current_control.set_d_value(value),
+            None => (),
+        }
     }
 
     #[idle(resources = [total_sleep_time])]

@@ -58,6 +58,16 @@ where
         s
     }
 
+    pub fn set_p_value(&mut self, p_value: i32) {
+        self.pid.p_gain = p_value;
+    }
+    pub fn set_i_value(&mut self, i_value: i32) {
+        self.pid.i_gain = i_value;
+    }
+    pub fn set_d_value(&mut self, d_value: i32) {
+        self.pid.d_gain = d_value;
+    }
+
     /// Can be positive and negative
     pub fn set_current(&mut self, milli_amps: i32) {
         self.current_setpoint = milli_amps;
