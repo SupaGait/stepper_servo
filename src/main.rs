@@ -9,10 +9,15 @@ mod position_control;
 
 // Imports
 use cortex_m::asm::nop;
+use motor_control::{Motor, MotorControl, Position};
 use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
 use rtfm::Monotonic;
-use stepper_servo_lib::serial_commands::{Command, SerialCommands};
+use stepper_servo_lib::{
+    motor_control,
+    serial_commands::{Command, SerialCommands},
+    util,
+};
 use stm32f1xx_hal::{
     adc, device,
     gpio::{gpioa, gpiob, gpioc},
@@ -56,7 +61,7 @@ type Usart1Type = (Tx<device::USART1>, Rx<device::USART1>);
 const APP: () = {
     struct Resources {
         adc: AdcType,
-        current_control: CurrentControlType,
+        motor_control: MotorControl<CurrentControlType>,
         position_control: PositionControlType,
         onboard_led: gpioc::PC13<Output<PushPull>>,
         display: DisplayType,
@@ -160,7 +165,7 @@ const APP: () = {
 
         init::LateResources {
             adc: adc1,
-            current_control,
+            motor_control: MotorControl::new(current_control),
             position_control,
             onboard_led,
             display,
@@ -197,33 +202,36 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(schedule = [update_display], resources = [display, current_control, processor_usage])]
+    #[task(schedule = [update_display], resources = [display, motor_control, processor_usage])]
     fn update_display(cx: update_display::Context) {
+        let motor_control: &mut MotorControl<CurrentControlType> = cx.resources.motor_control;
+        let motor = motor_control.get_motor();
+
         cx.resources
             .display
-            .update("Cyc", 0, cx.scheduled.elapsed().as_cycles());
+            .update("Cyc", 0, cx.scheduled.elapsed().as_cycles() as i32);
         cx.resources
             .display
-            .update("ADC", 2, cx.resources.current_control.adc_value() as u32);
+            .update("ADC", 2, motor.adc_value() as i32);
         cx.resources
             .display
-            .update_row_column("mV", 3, 0, cx.resources.current_control.voltage());
+            .update_row_column("mV", 3, 0, motor.voltage() as i32);
         cx.resources
             .display
-            .update_row_column("mA", 3, 8, cx.resources.current_control.current());
+            .update_row_column("mA", 3, 8, motor.current());
         cx.resources
             .display
-            .update("Dut", 4, cx.resources.current_control.duty_cycle() as u32);
+            .update("Dut", 4, motor.duty_cycle() as i32);
         cx.resources
             .display
-            .update("Cpu", 7, *cx.resources.processor_usage);
+            .update("Cpu", 7, *cx.resources.processor_usage as i32);
 
         cx.schedule
-            .update_display(cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles())
+            .update_display((cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).into())
             .unwrap();
     }
 
-    #[task(binds = ADC1_2, resources = [adc, current_control, prev_time, trigger_pin])]
+    #[task(binds = ADC1_2, resources = [adc, motor_control, prev_time, trigger_pin])]
     fn handle_adc(cx: handle_adc::Context) {
         //cx.resources.trigger_pin.toggle().unwrap();
         let adc: &AdcType = &cx.resources.adc;
@@ -234,30 +242,46 @@ const APP: () = {
                 adc_voltage = (3300 * adc_value) / adc.max_sample() as u32;
             }
 
-            let duration = cx.start.duration_since(*cx.resources.prev_time).as_cycles();
-            cx.resources
-                .current_control
-                .update(duration, adc_value, adc_voltage);
+            let delta_time = cx.start.duration_since(*cx.resources.prev_time).as_cycles();
+
+            // Set new angle == current setpoint
+            // 1Hz = DWT_FREQ(8_000_000) cycles
+            let motor_control: &mut MotorControl<CurrentControlType> = cx.resources.motor_control;
+            static mut ELAPSED: u32 = 0;
+            unsafe {
+                ELAPSED += delta_time;
+                if ELAPSED >= DWT_FREQ / 360 {
+                    ELAPSED -= DWT_FREQ / 360;
+                    motor_control.set_angle(motor_control.get_angle() + 1);
+                }
+            };
+
+            // Update the current loop
+            let motor = motor_control.get_motor();
+            motor.update(delta_time, adc_value, adc_voltage);
+
+            // used for delta time.
             *cx.resources.prev_time = cx.start;
         }
     }
 
-    #[task(binds = USART1, resources = [usart1, serial_commands, current_control])]
+    #[task(binds = USART1, resources = [usart1, serial_commands, motor_control])]
     fn handle_usart1(cx: handle_usart1::Context) {
         let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
         let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
+        let motor_control: &mut MotorControl<CurrentControlType> = cx.resources.motor_control;
+        let motor = motor_control.get_motor();
 
         let data = rx.read().unwrap();
         serial_commands.add_character(data);
 
-        let current_control = cx.resources.current_control;
         match serial_commands.get_command() {
             Some(Command::Stop) => (),
             Some(Command::Left { speed: _ }) => (),
             Some(Command::Right { speed: _ }) => (),
-            Some(Command::P(value)) => current_control.set_p_value(value),
-            Some(Command::I(value)) => current_control.set_i_value(value),
-            Some(Command::D(value)) => current_control.set_d_value(value),
+            Some(Command::P(value)) => motor.set_p_value(value),
+            Some(Command::I(value)) => motor.set_i_value(value),
+            Some(Command::D(value)) => motor.set_d_value(value),
             None => (),
         }
     }

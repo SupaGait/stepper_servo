@@ -1,4 +1,6 @@
-use crate::pid::{util, Controller, PIDController};
+use crate::motor_control;
+use crate::pid::{Controller, PIDController};
+use crate::util;
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::PwmPin;
 use l298n;
@@ -68,12 +70,6 @@ where
         self.pid.d_gain = d_value;
     }
 
-    /// Can be positive and negative
-    pub fn set_current(&mut self, milli_amps: i32) {
-        self.current_setpoint = milli_amps;
-        self.pid.set_target(milli_amps);
-    }
-
     pub fn adc_value(&self) -> u32 {
         self.adc_value
     }
@@ -84,10 +80,6 @@ where
 
     pub fn voltage(&self) -> u32 {
         self.voltage
-    }
-
-    pub fn current(&self) -> u32 {
-        self.current
     }
 
     pub fn update(&mut self, dt: u32, adc_value: u32, adc_voltage: u32) {
@@ -139,7 +131,25 @@ where
         let mut duty_cycle = self.duty_cycle as i32;
         duty_cycle += self.pid.update(self.current as i32, dt as i32) / PID_SCALING_FACTOR;
 
-        let duty_cycle = util::limit_range(0, 230, duty_cycle) as u32;
+        let duty_cycle = util::clamp(0, 230, duty_cycle) as u32;
         self.set_duty_cycle(duty_cycle);
+    }
+}
+
+impl<PWM, IN1, IN2> motor_control::Motor for CurrentControl<PWM, IN1, IN2>
+where
+    PWM: PwmPin<Duty = u16>,
+    IN1: OutputPin,
+    IN2: OutputPin,
+{
+    fn set_current(&mut self, milli_amps: i32) {
+        self.current_setpoint = milli_amps;
+        self.pid.set_target(milli_amps);
+    }
+    fn current(&self) -> i32 {
+        match self.direction {
+            Direction::CW => self.current as i32,
+            Direction::CCW => -1 * self.current as i32,
+        }
     }
 }
