@@ -6,6 +6,9 @@
         },
         {
             "path": "..\\stepper_servo_lib"
+        },
+        {
+            "path": "..\\stm32f1xx-hal"
         }
     ],
     "settings": {

@@ -37,12 +37,17 @@ const SHUNT_RESISTANCE: u32 = 400; //mOhms
 
 // Types
 type AdcType = adc::AdcInt<device::ADC1>;
-type CurrentOutputType = current_output::CurrentOuput<
+type CurrentOutputCoilAType = current_output::CurrentOuput<
     pwm::PwmChannel<device::TIM2, stm32f1xx_hal::pwm::C1>,
-    gpiob::PB12<Output<PushPull>>,
-    gpiob::PB13<Output<PushPull>>,
+    gpioa::PA2<Output<PushPull>>,
+    gpioa::PA3<Output<PushPull>>,
 >;
-type MotorControlType = MotorControl<CurrentControl<CurrentOutputType>>;
+type CurrentOutputCoilBType = current_output::CurrentOuput<
+    pwm::PwmChannel<device::TIM2, stm32f1xx_hal::pwm::C1>,
+    gpioa::PA4<Output<PushPull>>,
+    gpioa::PA5<Output<PushPull>>,
+>;
+type MotorControlType = MotorControl<CurrentControl<CurrentOutputCoilAType>>;
 type PositionControlType =
     position_control::PositionControl<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
 type DisplayType = display::Display<
@@ -88,30 +93,55 @@ const APP: () = {
 
         let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
 
-        //ADC
-        let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
-        let mut adc1 = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
-        adc1.set_sample_time(adc::SampleTime::T_239);
-        let mut adc1 = adc1.into_interrupt(ch0);
-        adc1.enable();
         // Enable the monotonic timer CYCCNT
         core.DWT.enable_cycle_counter();
 
-        // Current control
-        //PWM
+        // Current Control - Coil A - ADC
+        let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
+        let mut adc = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
+        adc.set_sample_time(adc::SampleTime::T_239);
+        let mut adc_coil_a = adc.into_interrupt(ch0);
+        adc_coil_a.enable();
+
+        // Current Control - Coil A - PWM
         let pwm_pin = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
         let mut afio = peripherals.AFIO.constrain(&mut rcc.apb2);
         let timer2 = Timer::tim2(peripherals.TIM2, &clocks, &mut rcc.apb1);
         let mut pwm_timer2 = timer2.pwm::<Tim2NoRemap, _, _, _>(pwm_pin, &mut afio.mapr, 20.khz());
         pwm_timer2.enable(Channel::C1);
 
-        // Current Control
-        let in1 = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
-        let in2 = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
+        // Current Control - Coil A - DIR
+        let in1 = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
+        let in2 = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
         let pwm = pwm_timer2.split();
-        let current_output = CurrentOutputType::new(pwm, in1, in2);
-        let mut current_control = CurrentControl::new(SHUNT_RESISTANCE, current_output);
-        current_control.set_current(150);
+        let current_output = CurrentOutputCoilAType::new(pwm, in1, in2);
+        let mut current_control_coil_a = CurrentControl::new(SHUNT_RESISTANCE, current_output);
+        current_control_coil_a.set_current(100);
+
+        // Current Control - Coil B - ADC
+        let ch0 = gpiob.pb1.into_analog(&mut gpiob.crl);
+        let mut adc = adc::Adc::adc2(peripherals.ADC2, &mut rcc.apb2, clocks);
+        adc.set_sample_time(adc::SampleTime::T_239);
+        let mut adc_coil_b = adc.into_interrupt(ch0);
+        adc_coil_b.enable();
+
+        // Current Control - Coil B - PWM
+        let pwm_pin = gpioa.pa1.into_alternate_push_pull(&mut gpioa.crl);
+        let mut afio = peripherals.AFIO.constrain(&mut rcc.apb2);
+        let timer3 = Timer::tim3(peripherals.TIM3, &clocks, &mut rcc.apb1);
+        let mut pwm_timer3 = timer3.pwm::<Tim2NoRemap, _, _, _>(pwm_pin, &mut afio.mapr, 20.khz());
+        pwm_timer3.enable(Channel::C1);
+        
+        // Current Control - Coil B - DIR
+        let in1 = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+        let in2 = gpioa.pa5.into_push_pull_output(&mut gpioa.crl);
+        let pwm = pwm_timer2.split();
+        let current_output = CurrentOutputCoilBType::new(pwm, in1, in2);
+        let mut current_control_coil_b = CurrentControl::new(SHUNT_RESISTANCE, current_output);
+        current_control_coil_b.set_current(100);
+        
+
+
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
@@ -165,8 +195,8 @@ const APP: () = {
         let trigger_pin = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
 
         init::LateResources {
-            adc: adc1,
-            motor_control: MotorControl::new(current_control),
+            adc: adc_coil_a,
+            motor_control: MotorControl::new(current_control_coil_a),
             position_control,
             onboard_led,
             display,
