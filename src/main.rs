@@ -8,6 +8,7 @@ mod position_control;
 
 // Imports
 use cortex_m::asm::nop;
+use embedded_hal::digital::v2::OutputPin;
 use motor_control::{CurrentDevice, MotorControl, PositionControlled};
 use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
@@ -110,7 +111,7 @@ const APP: () = {
         let pwm = pwm_timer2.split();
         let current_output = CurrentOutputType::new(pwm, in1, in2);
         let mut current_control = CurrentControl::new(SHUNT_RESISTANCE, current_output);
-        current_control.set_current(100);
+        current_control.set_current(150);
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
@@ -233,10 +234,11 @@ const APP: () = {
 
     #[task(binds = ADC1_2, resources = [adc, motor_control, prev_time, trigger_pin])]
     fn handle_adc(cx: handle_adc::Context) {
-        //cx.resources.trigger_pin.toggle().unwrap();
         let adc: &AdcType = &cx.resources.adc;
         if adc.is_ready() {
             let adc_value = adc.read_value() as u32;
+            cx.resources.trigger_pin.set_high().unwrap();
+
             let adc_voltage = if adc_value > 0 {
                 ((3300 * adc_value) / adc.max_sample() as u32) as i32
             } else {
@@ -263,6 +265,7 @@ const APP: () = {
 
             // used for delta time.
             *cx.resources.prev_time = cx.start;
+            cx.resources.trigger_pin.set_low().unwrap();
         }
     }
 

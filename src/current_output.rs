@@ -5,6 +5,7 @@ use stepper_servo_lib::current_control::CurrentOutput;
 
 #[derive(PartialEq)]
 enum Direction {
+    Brake,
     CCW,
     CW,
 }
@@ -93,6 +94,7 @@ where
                 self.motor.set_duty(0);
                 self.motor.brake();
                 self.enabled = false;
+                self.direction = Direction::Brake;
             }
         }
     }
