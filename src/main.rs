@@ -4,18 +4,17 @@
 // Local modules
 mod current_output;
 mod display;
-mod position_control;
+mod position_input;
 
 // Imports
 use cortex_m::asm::nop;
 use embedded_hal::digital::v2::OutputPin;
-use motor_control::{CurrentDevice, MotorControl /*,PositionControlled*/};
 use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
 use rtfm::Monotonic;
 use stepper_servo_lib::{
-    current_control::CurrentControl,
-    motor_control,
+    current_control::{CurrentDevice, CurrentControl},
+    motor_control::{MotorControl},
     serial_commands::{Command, SerialCommands},
 };
 use stm32f1xx_hal::{
@@ -50,7 +49,7 @@ type CurrentOutputCoilBType = current_output::CurrentOuput<
 type MotorControlType =
     MotorControl<CurrentControl<CurrentOutputCoilAType>, CurrentControl<CurrentOutputCoilBType>>;
 type PositionControlType =
-    position_control::PositionControl<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
+position_input::PositionInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
 type DisplayType = display::Display<
     ssd1306::interface::i2c::I2cInterface<
         BlockingI2c<
@@ -147,7 +146,7 @@ const APP: () = {
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
         let pin_b = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
-        let position_control = position_control::PositionControl::new(pin_a, pin_b);
+        let position_control = position_input::PositionInput::new(pin_a, pin_b);
 
         // Led
         let onboard_led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
@@ -240,39 +239,39 @@ const APP: () = {
     fn update_display(cx: update_display::Context) {
         let motor_control: &mut MotorControlType = cx.resources.motor_control;
 
-        let motor_coil_a = motor_control.get_current_control_coil_a();
+        let current_control_coil_a = motor_control.coil_a().current_control();
         cx.resources
             .display
-            .update_row_column("ADC", 2, 0, motor_coil_a.adc_value() as i32);
+            .update_row_column("ADC", 2, 0, current_control_coil_a.adc_value() as i32);
         cx.resources
             .display
-            .update_row_column("mV", 3, 0, motor_coil_a.voltage() as i32);
+            .update_row_column("mV", 3, 0, current_control_coil_a.voltage() as i32);
         cx.resources
             .display
-            .update_row_column("mA", 4, 0, motor_coil_a.current());
+            .update_row_column("mA", 4, 0, current_control_coil_a.current());
         cx.resources.display.update_row_column(
             "Dut",
             5,
             0,
-            motor_coil_a.get_current_output().duty_cycle() as i32,
+            current_control_coil_a.get_current_output().duty_cycle() as i32,
         );
 
-        let motor_coil_b = motor_control.get_current_control_coil_b();
+        let current_control_coil_b = motor_control.coil_b().current_control();
         cx.resources
             .display
-            .update_row_column("ADC", 2, 8, motor_coil_b.adc_value() as i32);
+            .update_row_column("ADC", 2, 8, current_control_coil_b.adc_value() as i32);
         cx.resources
             .display
-            .update_row_column("mV", 3, 8, motor_coil_b.voltage() as i32);
+            .update_row_column("mV", 3, 8, current_control_coil_b.voltage() as i32);
         cx.resources
             .display
-            .update_row_column("mA", 4, 8, motor_coil_b.current());
+            .update_row_column("mA", 4, 8, current_control_coil_b.current());
 
         cx.resources.display.update_row_column(
             "Dut",
             5,
             8,
-            motor_coil_b.get_current_output().duty_cycle() as i32,
+            current_control_coil_b.get_current_output().duty_cycle() as i32,
         );
 
         cx.resources
@@ -303,8 +302,8 @@ const APP: () = {
 
             // Update the current loop
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
-            let motor = motor_control.get_current_control_coil_a();
-            motor.update(delta_time, adc_value, adc_voltage);
+            let current_control = motor_control.coil_a().current_control();
+            current_control.update(delta_time, adc_value, adc_voltage);
 
             // used for delta time.
             *cx.resources.prev_time_coil_a = cx.start;
@@ -328,8 +327,8 @@ const APP: () = {
 
             // Update the current loop
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
-            let motor = motor_control.get_current_control_coil_b();
-            motor.update(delta_time, adc_value, adc_voltage);
+            let current_control = motor_control.coil_b().current_control();
+            current_control.update(delta_time, adc_value, adc_voltage);
 
             // used for delta time.
             *cx.resources.prev_time_coil_b = cx.start;
@@ -341,18 +340,18 @@ const APP: () = {
         let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
         let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
         let motor_control: &mut MotorControlType = cx.resources.motor_control;
-        let motor = motor_control.get_current_control_coil_a();
+        let current_control = motor_control.coil_a().current_control();
 
         let data = rx.read().unwrap();
         serial_commands.add_character(data);
 
         match serial_commands.get_command() {
-            Some(Command::Enable) => motor.enable(true),
-            Some(Command::Disable) => motor.enable(false),
-            Some(Command::Cur { current }) => motor.set_current(current),
-            Some(Command::P(value)) => motor.set_p_value(value),
-            Some(Command::I(value)) => motor.set_i_value(value),
-            Some(Command::D(value)) => motor.set_d_value(value),
+            Some(Command::Enable) => current_control.enable(true),
+            Some(Command::Disable) => current_control.enable(false),
+            Some(Command::Cur { current }) => current_control.set_current(current),
+            Some(Command::P(value)) => current_control.set_p_value(value),
+            Some(Command::I(value)) => current_control.set_i_value(value),
+            Some(Command::D(value)) => current_control.set_d_value(value),
             None => (),
         }
     }

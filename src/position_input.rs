@@ -2,12 +2,12 @@ use embedded_hal as hal;
 use hal::digital::v2::InputPin;
 use rotary_encoder_hal::{Direction, Rotary};
 
-pub struct PositionControl<A, B> {
+pub struct PositionInput<A, B> {
     rotary: Rotary<A, B>,
     position: isize,
 }
 
-impl<A, B> PositionControl<A, B>
+impl<A, B> PositionInput<A, B>
 where
     A: InputPin,
     B: InputPin,
