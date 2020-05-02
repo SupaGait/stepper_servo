@@ -75,7 +75,8 @@ const APP: () = {
         display: DisplayType,
         usart1: Usart1Type,
         serial_commands: SerialCommands,
-        prev_time: Instant,
+        prev_time_coil_a: Instant,
+        prev_time_coil_b: Instant,
         trigger_pin: gpiob::PB12<Output<PushPull>>,
         total_sleep_time: Duration,
         previous_time: Instant,
@@ -203,7 +204,8 @@ const APP: () = {
             display,
             usart1,
             serial_commands: SerialCommands::default(),
-            prev_time: cx.start,
+            prev_time_coil_a: cx.start,
+            prev_time_coil_b: cx.start,
             trigger_pin,
             total_sleep_time: Duration::from_cycles(0),
             previous_time: CYCCNT::zero(),
@@ -237,33 +239,51 @@ const APP: () = {
     #[task(schedule = [update_display], resources = [display, motor_control, processor_usage])]
     fn update_display(cx: update_display::Context) {
         let motor_control: &mut MotorControlType = cx.resources.motor_control;
-        let motor = motor_control.get_current_control();
+
+        let motor_coil_a = motor_control.get_current_control_coil_a();
+        cx.resources
+            .display
+            .update_row_column("ADC", 2, 0, motor_coil_a.adc_value() as i32);
+        cx.resources
+            .display
+            .update_row_column("mV", 3, 0, motor_coil_a.voltage() as i32);
+        cx.resources
+            .display
+            .update_row_column("mA", 4, 0, motor_coil_a.current());
+        cx.resources.display.update_row_column(
+            "Dut",
+            5,
+            0,
+            motor_coil_a.get_current_output().duty_cycle() as i32,
+        );
+
+        let motor_coil_b = motor_control.get_current_control_coil_b();
+        cx.resources
+            .display
+            .update_row_column("ADC", 2, 8, motor_coil_b.adc_value() as i32);
+        cx.resources
+            .display
+            .update_row_column("mV", 3, 8, motor_coil_b.voltage() as i32);
+        cx.resources
+            .display
+            .update_row_column("mA", 4, 8, motor_coil_b.current());
+
+        cx.resources.display.update_row_column(
+            "Dut",
+            5,
+            8,
+            motor_coil_b.get_current_output().duty_cycle() as i32,
+        );
 
         cx.resources
             .display
-            .update("Cyc", 0, cx.scheduled.elapsed().as_cycles() as i32);
-        cx.resources
-            .display
-            .update("ADC", 2, motor.adc_value() as i32);
-        cx.resources
-            .display
-            .update_row_column("mV", 3, 0, motor.voltage() as i32);
-        cx.resources
-            .display
-            .update_row_column("mA", 3, 8, motor.current());
-        cx.resources
-            .display
-            .update("Dut", 4, motor.get_current_output().duty_cycle() as i32);
-        cx.resources
-            .display
-            .update("Cpu", 7, *cx.resources.processor_usage as i32);
-
+            .update_row_column("Cpu", 7, 0, *cx.resources.processor_usage as i32);
         cx.schedule
             .update_display((cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).into())
             .unwrap();
     }
 
-    #[task(binds = ADC1_2, resources = [adc_coil_a, adc_coil_b, motor_control, prev_time, trigger_pin])]
+    #[task(binds = ADC1_2, resources = [adc_coil_a, adc_coil_b, motor_control, prev_time_coil_a, prev_time_coil_b, trigger_pin])]
     fn handle_adc(cx: handle_adc::Context) {
         let adc_coil_a: &AdcCoilAType = &cx.resources.adc_coil_a;
         if adc_coil_a.is_ready() {
@@ -276,32 +296,43 @@ const APP: () = {
                 0
             };
 
-            let delta_time = cx.start.duration_since(*cx.resources.prev_time).as_cycles();
-
-            // Set new angle == current setpoint
-            // 1Hz = DWT_FREQ(8_000_000) cycles
-            let motor_control: &mut MotorControlType = cx.resources.motor_control;
-            // static mut ELAPSED: u32 = 0;
-            // unsafe {
-            //     ELAPSED += delta_time;
-            //     if ELAPSED >= DWT_FREQ / 360 {
-            //         ELAPSED -= DWT_FREQ / 360;
-            //         motor_control.set_angle(motor_control.get_angle() + 1);
-            //     }
-            // };
+            let delta_time = cx
+                .start
+                .duration_since(*cx.resources.prev_time_coil_a)
+                .as_cycles();
 
             // Update the current loop
-            let motor = motor_control.get_current_control();
+            let motor_control: &mut MotorControlType = cx.resources.motor_control;
+            let motor = motor_control.get_current_control_coil_a();
             motor.update(delta_time, adc_value, adc_voltage);
 
             // used for delta time.
-            *cx.resources.prev_time = cx.start;
+            *cx.resources.prev_time_coil_a = cx.start;
             cx.resources.trigger_pin.set_low().unwrap();
         }
         // Only clear interrupt, not using yet, aslo needs to be generalised.
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
         if adc_coil_b.is_ready() {
-            let _adc_value = adc_coil_b.read_value() as u32;
+            let adc_value = adc_coil_b.read_value() as u32;
+
+            let adc_voltage = if adc_value > 0 {
+                ((3300 * adc_value) / adc_coil_a.max_sample() as u32) as i32
+            } else {
+                0
+            };
+
+            let delta_time = cx
+                .start
+                .duration_since(*cx.resources.prev_time_coil_b)
+                .as_cycles();
+
+            // Update the current loop
+            let motor_control: &mut MotorControlType = cx.resources.motor_control;
+            let motor = motor_control.get_current_control_coil_b();
+            motor.update(delta_time, adc_value, adc_voltage);
+
+            // used for delta time.
+            *cx.resources.prev_time_coil_b = cx.start;
         }
     }
 
@@ -310,7 +341,7 @@ const APP: () = {
         let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
         let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
         let motor_control: &mut MotorControlType = cx.resources.motor_control;
-        let motor = motor_control.get_current_control();
+        let motor = motor_control.get_current_control_coil_a();
 
         let data = rx.read().unwrap();
         serial_commands.add_character(data);
@@ -318,8 +349,7 @@ const APP: () = {
         match serial_commands.get_command() {
             Some(Command::Enable) => motor.enable(true),
             Some(Command::Disable) => motor.enable(false),
-            Some(Command::Left { speed: _ }) => (),
-            Some(Command::Right { speed: _ }) => (),
+            Some(Command::Cur { current }) => motor.set_current(current),
             Some(Command::P(value)) => motor.set_p_value(value),
             Some(Command::I(value)) => motor.set_i_value(value),
             Some(Command::D(value)) => motor.set_d_value(value),
