@@ -13,8 +13,8 @@ use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
 use rtfm::Monotonic;
 use stepper_servo_lib::{
-    current_control::{CurrentDevice, CurrentControl},
-    motor_control::{MotorControl},
+    current_control::{CurrentControl, CurrentDevice},
+    motor_control::{MotorControl, PositionControlled},
     serial_commands::{Command, SerialCommands},
 };
 use stm32f1xx_hal::{
@@ -49,7 +49,7 @@ type CurrentOutputCoilBType = current_output::CurrentOuput<
 type MotorControlType =
     MotorControl<CurrentControl<CurrentOutputCoilAType>, CurrentControl<CurrentOutputCoilBType>>;
 type PositionControlType =
-position_input::PositionInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
+    position_input::PositionInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
 type DisplayType = display::Display<
     ssd1306::interface::i2c::I2cInterface<
         BlockingI2c<
@@ -76,7 +76,8 @@ const APP: () = {
         serial_commands: SerialCommands,
         prev_time_coil_a: Instant,
         prev_time_coil_b: Instant,
-        trigger_pin: gpiob::PB12<Output<PushPull>>,
+        delta_test_rotation: Instant,
+        debug_pin: gpiob::PB12<Output<PushPull>>,
         total_sleep_time: Duration,
         previous_time: Instant,
         processor_usage: u32,
@@ -127,7 +128,7 @@ const APP: () = {
         let in2 = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
         let current_output = CurrentOutputCoilAType::new(pwm_coil_a, in1, in2);
         let mut current_control_coil_a = CurrentControl::new(SHUNT_RESISTANCE, current_output);
-        current_control_coil_a.set_current(100);
+        current_control_coil_a.set_current(200);
 
         // Current Control - Coil B - ADC
         let ch0 = gpiob.pb1.into_analog(&mut gpiob.crl);
@@ -141,7 +142,7 @@ const APP: () = {
         let in2 = gpioa.pa5.into_push_pull_output(&mut gpioa.crl);
         let current_output = CurrentOutputCoilBType::new(pwm_coil_b, in1, in2);
         let mut current_control_coil_b = CurrentControl::new(SHUNT_RESISTANCE, current_output);
-        current_control_coil_b.set_current(100);
+        current_control_coil_b.set_current(200);
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
@@ -192,7 +193,7 @@ const APP: () = {
         usart1.1.listen();
 
         // DEBUG
-        let trigger_pin = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+        let debug_pin = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
 
         init::LateResources {
             adc_coil_a,
@@ -205,7 +206,8 @@ const APP: () = {
             serial_commands: SerialCommands::default(),
             prev_time_coil_a: cx.start,
             prev_time_coil_b: cx.start,
-            trigger_pin,
+            delta_test_rotation: cx.start,
+            debug_pin,
             total_sleep_time: Duration::from_cycles(0),
             previous_time: CYCCNT::zero(),
             processor_usage: 0,
@@ -240,9 +242,12 @@ const APP: () = {
         let motor_control: &mut MotorControlType = cx.resources.motor_control;
 
         let current_control_coil_a = motor_control.coil_a().current_control();
-        cx.resources
-            .display
-            .update_row_column("ADC", 2, 0, current_control_coil_a.adc_value() as i32);
+        cx.resources.display.update_row_column(
+            "ADC",
+            2,
+            0,
+            current_control_coil_a.adc_value() as i32,
+        );
         cx.resources
             .display
             .update_row_column("mV", 3, 0, current_control_coil_a.voltage() as i32);
@@ -257,9 +262,12 @@ const APP: () = {
         );
 
         let current_control_coil_b = motor_control.coil_b().current_control();
-        cx.resources
-            .display
-            .update_row_column("ADC", 2, 8, current_control_coil_b.adc_value() as i32);
+        cx.resources.display.update_row_column(
+            "ADC",
+            2,
+            8,
+            current_control_coil_b.adc_value() as i32,
+        );
         cx.resources
             .display
             .update_row_column("mV", 3, 8, current_control_coil_b.voltage() as i32);
@@ -282,12 +290,17 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(binds = ADC1_2, resources = [adc_coil_a, adc_coil_b, motor_control, prev_time_coil_a, prev_time_coil_b, trigger_pin])]
+    #[task(binds = ADC1_2, resources = [
+        adc_coil_a, adc_coil_b, motor_control, 
+        prev_time_coil_a, prev_time_coil_b, delta_test_rotation,
+        debug_pin])]
     fn handle_adc(cx: handle_adc::Context) {
+        // START mark
+        cx.resources.debug_pin.set_high().unwrap();
+
         let adc_coil_a: &AdcCoilAType = &cx.resources.adc_coil_a;
         if adc_coil_a.is_ready() {
             let adc_value = adc_coil_a.read_value() as u32;
-            cx.resources.trigger_pin.set_high().unwrap();
 
             let adc_voltage = if adc_value > 0 {
                 ((3300 * adc_value) / adc_coil_a.max_sample() as u32) as i32
@@ -305,9 +318,22 @@ const APP: () = {
             let current_control = motor_control.coil_a().current_control();
             current_control.update(delta_time, adc_value, adc_voltage);
 
+            // // Update the phase loop
+            // let coil = motor_control.coil_a();
+            // static mut DELAY_LOOP: u32 = 0;
+            // static mut DEGREES: i32 = 0;
+            // unsafe {
+            //     DELAY_LOOP += 1;
+            //     if DELAY_LOOP >= 1_00 {
+            //         DELAY_LOOP = 0;
+            //         DEGREES = if DEGREES < 360 { DEGREES + 1 } else { 0 };
+            //         coil.set_angle(DEGREES, 100);
+            //     }
+            // };
+
             // used for delta time.
             *cx.resources.prev_time_coil_a = cx.start;
-            cx.resources.trigger_pin.set_low().unwrap();
+            cx.resources.debug_pin.set_low().unwrap();
         }
         // Only clear interrupt, not using yet, aslo needs to be generalised.
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
@@ -333,6 +359,21 @@ const APP: () = {
             // used for delta time.
             *cx.resources.prev_time_coil_b = cx.start;
         }
+
+        // TEST: update the phase loop
+        if cx.start.duration_since(*cx.resources.delta_test_rotation).as_cycles() > DWT_FREQ/5000 {
+            *cx.resources.delta_test_rotation = Instant::now();
+
+            // Update the phase loop
+            static mut DEGREES: i32 = 0;
+            unsafe {
+                DEGREES = if DEGREES < 360 { DEGREES + 1 } else { 0 };
+                cx.resources.motor_control.set_angle(DEGREES);
+             };
+        }
+
+        // END mark
+        cx.resources.debug_pin.set_low().unwrap();
     }
 
     #[task(binds = USART1, resources = [usart1, serial_commands, motor_control])]
