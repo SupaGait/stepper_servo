@@ -14,7 +14,7 @@ use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
 use rtfm::Monotonic;
 use stepper_servo_lib::{
     current_control::{CurrentControl, CurrentDevice, PIDControl},
-    motor_control::{MotorControl, PositionControlled},
+    motor_control::{MotorControl    },
     serial_commands::{Command, SerialCommands},
 };
 use stm32f1xx_hal::{
@@ -31,6 +31,7 @@ use stm32f1xx_hal::{
 const DWT_FREQ: u32 = 8_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 1;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
+const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1000;
 const SHUNT_RESISTANCE: u32 = 400; //mOhms
 
 // Types
@@ -76,14 +77,13 @@ const APP: () = {
         serial_commands: SerialCommands,
         prev_time_coil_a: Instant,
         prev_time_coil_b: Instant,
-        delta_test_rotation: Instant,
         debug_pin: gpiob::PB12<Output<PushPull>>,
         total_sleep_time: Duration,
         previous_time: Instant,
         processor_usage: u32,
     }
 
-    #[init(schedule = [blink_led, update_display])]
+    #[init(schedule = [blink_led, update_motor, update_display])]
     fn init(cx: init::Context) -> init::LateResources {
         let peripherals = cx.device;
         let mut core = cx.core;
@@ -190,6 +190,11 @@ const APP: () = {
         .split();
         usart1.1.listen();
 
+        // Motor update
+        cx.schedule
+            .update_motor(cx.start + MOTOR_CONTROL_PERIOD.cycles())
+            .unwrap();
+
         // DEBUG
         let debug_pin = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
 
@@ -204,7 +209,6 @@ const APP: () = {
             serial_commands: SerialCommands::default(),
             prev_time_coil_a: cx.start,
             prev_time_coil_b: cx.start,
-            delta_test_rotation: cx.start,
             debug_pin,
             total_sleep_time: Duration::from_cycles(0),
             previous_time: CYCCNT::zero(),
@@ -232,6 +236,18 @@ const APP: () = {
 
         cx.schedule
             .blink_led(cx.scheduled + BLINKING_LED_PERIOD.cycles())
+            .unwrap();
+    }
+
+    #[task(schedule = [update_motor], resources = [motor_control])]
+    fn update_motor(cx: update_motor::Context) {
+
+        // Returns nex required update in uS
+        let next_call_us = cx.resources.motor_control.update();
+        let next_call_cycles = next_call_us * 8; // @ 8_000_000 hz
+
+        cx.schedule
+            .update_motor(cx.scheduled + Duration::from_cycles(next_call_cycles))
             .unwrap();
     }
 
@@ -290,7 +306,7 @@ const APP: () = {
 
     #[task(binds = ADC1_2, resources = [
         adc_coil_a, adc_coil_b, motor_control, 
-        prev_time_coil_a, prev_time_coil_b, delta_test_rotation,
+        prev_time_coil_a, prev_time_coil_b,
         debug_pin])]
     fn handle_adc(cx: handle_adc::Context) {
         // START mark
@@ -315,19 +331,6 @@ const APP: () = {
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_a().current_control();
             current_control.update(delta_time, adc_value, adc_voltage);
-
-            // // Update the phase loop
-            // let coil = motor_control.coil_a();
-            // static mut DELAY_LOOP: u32 = 0;
-            // static mut DEGREES: i32 = 0;
-            // unsafe {
-            //     DELAY_LOOP += 1;
-            //     if DELAY_LOOP >= 1_00 {
-            //         DELAY_LOOP = 0;
-            //         DEGREES = if DEGREES < 360 { DEGREES + 1 } else { 0 };
-            //         coil.set_angle(DEGREES, 100);
-            //     }
-            // };
 
             // used for delta time.
             *cx.resources.prev_time_coil_a = cx.start;
@@ -358,18 +361,6 @@ const APP: () = {
             *cx.resources.prev_time_coil_b = cx.start;
         }
 
-        // TEST: update the phase loop
-        if cx.start.duration_since(*cx.resources.delta_test_rotation).as_cycles() > DWT_FREQ/5000 {
-            *cx.resources.delta_test_rotation = Instant::now();
-
-            // Update the phase loop
-            static mut DEGREES: i32 = 0;
-            unsafe {
-                DEGREES = if DEGREES < 360 { DEGREES + 1 } else { 0 };
-                cx.resources.motor_control.set_angle(DEGREES);
-             };
-        }
-
         // END mark
         cx.resources.debug_pin.set_low().unwrap();
     }
@@ -386,6 +377,8 @@ const APP: () = {
         match serial_commands.get_command() {
             Some(Command::Enable) => motor_control.enable(true),
             Some(Command::Disable) => motor_control.enable(false),
+            Some(Command::Run{speed}) => motor_control.rotate(speed),
+            Some(Command::Hold) => motor_control.hold(false),
             Some(Command::Cur { current }) => motor_control.set_current(current),
             Some(Command::P(value)) => motor_control.set_controller_p(value),
             Some(Command::I(value)) => motor_control.set_controller_i(value),
