@@ -11,3 +11,8 @@
         - Sine_lookup
         - Current_control 
             - Current_output
+
+
+
+coil_a   coil_a   coil_a
+     coil_b   coil_b

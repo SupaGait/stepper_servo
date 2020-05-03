@@ -13,7 +13,7 @@ use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
 use rtfm::Monotonic;
 use stepper_servo_lib::{
-    current_control::{CurrentControl, CurrentDevice},
+    current_control::{CurrentControl, CurrentDevice, PIDControl},
     motor_control::{MotorControl, PositionControlled},
     serial_commands::{Command, SerialCommands},
 };
@@ -127,8 +127,7 @@ const APP: () = {
         let in1 = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
         let in2 = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
         let current_output = CurrentOutputCoilAType::new(pwm_coil_a, in1, in2);
-        let mut current_control_coil_a = CurrentControl::new(SHUNT_RESISTANCE, current_output);
-        current_control_coil_a.set_current(200);
+        let current_control_coil_a = CurrentControl::new(SHUNT_RESISTANCE, current_output);
 
         // Current Control - Coil B - ADC
         let ch0 = gpiob.pb1.into_analog(&mut gpiob.crl);
@@ -141,8 +140,7 @@ const APP: () = {
         let in1 = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
         let in2 = gpioa.pa5.into_push_pull_output(&mut gpioa.crl);
         let current_output = CurrentOutputCoilBType::new(pwm_coil_b, in1, in2);
-        let mut current_control_coil_b = CurrentControl::new(SHUNT_RESISTANCE, current_output);
-        current_control_coil_b.set_current(200);
+        let current_control_coil_b = CurrentControl::new(SHUNT_RESISTANCE, current_output);
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
@@ -381,18 +379,17 @@ const APP: () = {
         let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
         let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
         let motor_control: &mut MotorControlType = cx.resources.motor_control;
-        let current_control = motor_control.coil_a().current_control();
 
         let data = rx.read().unwrap();
         serial_commands.add_character(data);
 
         match serial_commands.get_command() {
-            Some(Command::Enable) => current_control.enable(true),
-            Some(Command::Disable) => current_control.enable(false),
-            Some(Command::Cur { current }) => current_control.set_current(current),
-            Some(Command::P(value)) => current_control.set_p_value(value),
-            Some(Command::I(value)) => current_control.set_i_value(value),
-            Some(Command::D(value)) => current_control.set_d_value(value),
+            Some(Command::Enable) => motor_control.enable(true),
+            Some(Command::Disable) => motor_control.enable(false),
+            Some(Command::Cur { current }) => motor_control.set_current(current),
+            Some(Command::P(value)) => motor_control.set_controller_p(value),
+            Some(Command::I(value)) => motor_control.set_controller_i(value),
+            Some(Command::D(value)) => motor_control.set_controller_d(value),
             None => (),
         }
     }

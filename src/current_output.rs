@@ -34,7 +34,7 @@ where
             duty_cycle: 0,
             motor: l298n::Motor::new(in1, in2, pwm),
             direction: Direction::CW,
-            enabled: true,
+            enabled: false,
         };
         s.motor.forward();
         s
