@@ -14,7 +14,7 @@ use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
 use rtfm::Monotonic;
 use stepper_servo_lib::{
     current_control::{CurrentControl, CurrentDevice, PIDControl},
-    motor_control::{MotorControl    },
+    motor_control::MotorControl,
     serial_commands::{Command, SerialCommands},
 };
 use stm32f1xx_hal::{
@@ -196,8 +196,8 @@ const APP: () = {
             .unwrap();
 
         let mut motor_control = MotorControl::new(current_control_coil_a, current_control_coil_b);
-        motor_control.set_controller_p(10);
-        motor_control.set_controller_i(0);
+        motor_control.set_controller_p(0);
+        motor_control.set_controller_i(1);
         motor_control.set_controller_d(0);
 
         // DEBUG
@@ -245,10 +245,12 @@ const APP: () = {
     }
 
     #[task(schedule = [update_motor], resources = [motor_control])]
-    fn update_motor(cx: update_motor::Context) {
-
+    fn update_motor(mut cx: update_motor::Context) {
         // Returns nex required update in uS
-        let next_call_us = cx.resources.motor_control.update();
+        let mut next_call_us = 0;
+        cx.resources
+            .motor_control
+            .lock(|m| next_call_us = m.update());
         let next_call_cycles = next_call_us * 8; // @ 8_000_000 hz
 
         cx.schedule
@@ -257,49 +259,46 @@ const APP: () = {
     }
 
     #[task(schedule = [update_display], resources = [display, motor_control, processor_usage])]
-    fn update_display(cx: update_display::Context) {
-        let motor_control: &mut MotorControlType = cx.resources.motor_control;
+    fn update_display(mut cx: update_display::Context) {
+        let (mut adc_value, mut voltage, mut current, mut duty_cycle): (i32, i32, i32, i32) =
+            Default::default();
 
-        let current_control_coil_a = motor_control.coil_a().current_control();
-        cx.resources.display.update_row_column(
-            "ADC",
-            2,
-            0,
-            current_control_coil_a.adc_value() as i32,
-        );
-        cx.resources
-            .display
-            .update_row_column("mV", 3, 0, current_control_coil_a.voltage() as i32);
-        cx.resources
-            .display
-            .update_row_column("mA", 4, 0, current_control_coil_a.current());
-        cx.resources.display.update_row_column(
-            "Dut",
-            5,
-            0,
-            current_control_coil_a.get_current_output().duty_cycle() as i32,
-        );
+        // COIL A
+        cx.resources.motor_control.lock(|m| {
+            let current_control_coil_a = m.coil_a().current_control();
+            adc_value = current_control_coil_a.adc_value() as i32;
+            voltage = current_control_coil_a.voltage() as i32;
+            current = current_control_coil_a.current() as i32;
+            duty_cycle = current_control_coil_a.get_current_output().duty_cycle() as i32;
+        });
 
-        let current_control_coil_b = motor_control.coil_b().current_control();
-        cx.resources.display.update_row_column(
-            "ADC",
-            2,
-            8,
-            current_control_coil_b.adc_value() as i32,
-        );
         cx.resources
             .display
-            .update_row_column("mV", 3, 8, current_control_coil_b.voltage() as i32);
+            .update_row_column("ADC", 2, 0, adc_value);
+        cx.resources.display.update_row_column("mV", 3, 0, voltage);
+        cx.resources.display.update_row_column("mA", 4, 0, current);
         cx.resources
             .display
-            .update_row_column("mA", 4, 8, current_control_coil_b.current());
+            .update_row_column("Dut", 5, 0, duty_cycle);
 
-        cx.resources.display.update_row_column(
-            "Dut",
-            5,
-            8,
-            current_control_coil_b.get_current_output().duty_cycle() as i32,
-        );
+        // COIL B
+        cx.resources.motor_control.lock(|m| {
+            let current_control_coil_a = m.coil_b().current_control();
+            adc_value = current_control_coil_a.adc_value() as i32;
+            voltage = current_control_coil_a.voltage() as i32;
+            current = current_control_coil_a.current() as i32;
+            duty_cycle = current_control_coil_a.get_current_output().duty_cycle() as i32;
+        });
+
+        cx.resources
+            .display
+            .update_row_column("ADC", 2, 8, adc_value);
+        cx.resources.display.update_row_column("mV", 3, 8, voltage);
+        cx.resources.display.update_row_column("mA", 4, 8, current);
+
+        cx.resources
+            .display
+            .update_row_column("Dut", 5, 8, duty_cycle);
 
         cx.resources
             .display
@@ -309,10 +308,9 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(binds = ADC1_2, resources = [
-        adc_coil_a, adc_coil_b, motor_control, 
-        prev_time_coil_a, prev_time_coil_b,
-        debug_pin])]
+    #[task(binds = ADC1_2, priority = 10,
+        resources = [ adc_coil_a, adc_coil_b, motor_control,
+        prev_time_coil_a, prev_time_coil_b, debug_pin])]
     fn handle_adc(cx: handle_adc::Context) {
         // START mark
         cx.resources.debug_pin.set_high().unwrap();
@@ -371,23 +369,33 @@ const APP: () = {
     }
 
     #[task(binds = USART1, resources = [usart1, serial_commands, motor_control])]
-    fn handle_usart1(cx: handle_usart1::Context) {
+    fn handle_usart1(mut cx: handle_usart1::Context) {
         let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
         let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
-        let motor_control: &mut MotorControlType = cx.resources.motor_control;
 
         let data = rx.read().unwrap();
         serial_commands.add_character(data);
 
         match serial_commands.get_command() {
-            Some(Command::Enable) => motor_control.enable(true),
-            Some(Command::Disable) => motor_control.enable(false),
-            Some(Command::Run{speed}) => motor_control.rotate(speed),
-            Some(Command::Hold) => motor_control.hold(true),
-            Some(Command::Cur { current }) => motor_control.set_current(current),
-            Some(Command::P(value)) => motor_control.set_controller_p(value),
-            Some(Command::I(value)) => motor_control.set_controller_i(value),
-            Some(Command::D(value)) => motor_control.set_controller_d(value),
+            Some(Command::Enable) => cx.resources.motor_control.lock(|m| m.enable(true)),
+            Some(Command::Disable) => cx.resources.motor_control.lock(|m| m.enable(false)),
+            Some(Command::Run { speed }) => cx.resources.motor_control.lock(|m| m.rotate(speed)),
+            Some(Command::Hold) => cx.resources.motor_control.lock(|m| m.hold(true)),
+            Some(Command::Cur { current }) => {
+                cx.resources.motor_control.lock(|m| m.set_current(current))
+            }
+            Some(Command::P(value)) => cx
+                .resources
+                .motor_control
+                .lock(|m| m.set_controller_p(value)),
+            Some(Command::I(value)) => cx
+                .resources
+                .motor_control
+                .lock(|m| m.set_controller_i(value)),
+            Some(Command::D(value)) => cx
+                .resources
+                .motor_control
+                .lock(|m| m.set_controller_d(value)),
             None => (),
         }
     }
