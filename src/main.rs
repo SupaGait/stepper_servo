@@ -195,13 +195,18 @@ const APP: () = {
             .update_motor(cx.start + MOTOR_CONTROL_PERIOD.cycles())
             .unwrap();
 
+        let mut motor_control = MotorControl::new(current_control_coil_a, current_control_coil_b);
+        motor_control.set_controller_p(10);
+        motor_control.set_controller_i(0);
+        motor_control.set_controller_d(0);
+
         // DEBUG
         let debug_pin = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
 
         init::LateResources {
             adc_coil_a,
             adc_coil_b,
-            motor_control: MotorControl::new(current_control_coil_a, current_control_coil_b),
+            motor_control,
             position_control,
             onboard_led,
             display,
@@ -378,7 +383,7 @@ const APP: () = {
             Some(Command::Enable) => motor_control.enable(true),
             Some(Command::Disable) => motor_control.enable(false),
             Some(Command::Run{speed}) => motor_control.rotate(speed),
-            Some(Command::Hold) => motor_control.hold(false),
+            Some(Command::Hold) => motor_control.hold(true),
             Some(Command::Cur { current }) => motor_control.set_current(current),
             Some(Command::P(value)) => motor_control.set_controller_p(value),
             Some(Command::I(value)) => motor_control.set_controller_i(value),
