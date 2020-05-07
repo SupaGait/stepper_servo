@@ -28,8 +28,8 @@ use stm32f1xx_hal::{
     timer::{Tim2NoRemap, Timer},
 };
 
-const DWT_FREQ: u32 = 8_000_000;
-const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 1;
+const DWT_FREQ: u32 = 72_000_000;
+const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 2;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
 const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1000;
 const SHUNT_RESISTANCE: u32 = 400; //mOhms
@@ -79,11 +79,10 @@ const APP: () = {
         prev_time_coil_b: Instant,
         debug_pin: gpiob::PB12<Output<PushPull>>,
         total_sleep_time: Duration,
-        previous_time: Instant,
-        processor_usage: u32,
+        processor_usage: i32,
     }
 
-    #[init(schedule = [blink_led, update_motor, update_display])]
+    #[init(schedule = [blink_led, update_motor, update_display, cpu_usage])]
     fn init(cx: init::Context) -> init::LateResources {
         let peripherals = cx.device;
         let mut core = cx.core;
@@ -94,7 +93,15 @@ const APP: () = {
         let mut gpiob: gpiob::Parts = peripherals.GPIOB.split(&mut rcc.apb2);
         let mut gpioc: gpioc::Parts = peripherals.GPIOC.split(&mut rcc.apb2);
 
-        let clocks = rcc.cfgr.adcclk(2.mhz()).freeze(&mut flash.acr);
+        let clocks = rcc
+            .cfgr
+            .use_hse(8.mhz())
+            .sysclk(72.mhz())
+            .hclk(72.mhz())
+            .pclk1(36.mhz())
+            .pclk2(36.mhz())
+            .adcclk(2.mhz()) // Depends on pclk2
+            .freeze(&mut flash.acr);
 
         // Enable the monotonic timer CYCCNT
         core.DWT.enable_cycle_counter();
@@ -200,6 +207,9 @@ const APP: () = {
         motor_control.set_controller_i(1);
         motor_control.set_controller_d(0);
 
+        // CPU usage
+        cx.schedule.cpu_usage(cx.start + DWT_FREQ.cycles()).unwrap();
+
         // DEBUG
         let debug_pin = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
 
@@ -216,42 +226,43 @@ const APP: () = {
             prev_time_coil_b: cx.start,
             debug_pin,
             total_sleep_time: Duration::from_cycles(0),
-            previous_time: CYCCNT::zero(),
             processor_usage: 0,
         }
     }
 
-    #[task(schedule = [blink_led], resources = [onboard_led, total_sleep_time, previous_time, processor_usage])]
-    fn blink_led(cx: blink_led::Context) {
+    #[task(schedule = [cpu_usage],  priority = 5,
+        resources = [total_sleep_time, processor_usage])]
+    fn cpu_usage(cx: cpu_usage::Context) {
         // Calc elapsed time
-        let current_time = Instant::now();
-        let elapsed_time = current_time
-            .duration_since(*cx.resources.previous_time)
-            .as_cycles();
-
         *cx.resources.processor_usage =
-            100 - (100 * cx.resources.total_sleep_time.as_cycles()) / elapsed_time;
+            (100 - (100 * cx.resources.total_sleep_time.as_cycles()) / DWT_FREQ) as i32;
 
         // Prepare for next iteration.
         *cx.resources.total_sleep_time = Duration::from_cycles(0);
-        *cx.resources.previous_time = current_time;
 
+        cx.schedule
+            .cpu_usage(cx.scheduled + DWT_FREQ.cycles())
+            .unwrap();
+    }
+
+    #[task(schedule = [blink_led], resources = [onboard_led])]
+    fn blink_led(cx: blink_led::Context) {
         // Blink
         cx.resources.onboard_led.toggle().unwrap();
-
         cx.schedule
             .blink_led(cx.scheduled + BLINKING_LED_PERIOD.cycles())
             .unwrap();
     }
 
-    #[task(schedule = [update_motor], resources = [motor_control])]
+    #[task(schedule = [update_motor],  priority = 5,
+        resources = [motor_control])]
     fn update_motor(mut cx: update_motor::Context) {
         // Returns nex required update in uS
         let mut next_call_us = 0;
         cx.resources
             .motor_control
             .lock(|m| next_call_us = m.update());
-        let next_call_cycles = next_call_us * 8; // @ 8_000_000 hz
+        let next_call_cycles = next_call_us * 8; // @ 72_000_000 hz
 
         cx.schedule
             .update_motor(cx.scheduled + Duration::from_cycles(next_call_cycles))
@@ -295,14 +306,18 @@ const APP: () = {
             .update_row_column("ADC", 2, 8, adc_value);
         cx.resources.display.update_row_column("mV", 3, 8, voltage);
         cx.resources.display.update_row_column("mA", 4, 8, current);
-
         cx.resources
             .display
             .update_row_column("Dut", 5, 8, duty_cycle);
 
+        // CPU
+        let mut processor_usage = 0;
+        cx.resources.processor_usage.lock(|p| processor_usage = *p);
         cx.resources
             .display
-            .update_row_column("Cpu", 7, 0, *cx.resources.processor_usage as i32);
+            .update_row_column("Cpu", 7, 0, processor_usage);
+
+        // Re-shedule
         cx.schedule
             .update_display((cx.scheduled + DISPLAY_REFRESH_PERIOD.cycles()).into())
             .unwrap();
@@ -310,10 +325,10 @@ const APP: () = {
 
     #[task(binds = ADC1_2, priority = 10,
         resources = [ adc_coil_a, adc_coil_b, motor_control,
-        prev_time_coil_a, prev_time_coil_b, debug_pin])]
+        prev_time_coil_a, prev_time_coil_b, /*debug_pin*/])]
     fn handle_adc(cx: handle_adc::Context) {
         // START mark
-        cx.resources.debug_pin.set_high().unwrap();
+        //cx.resources.debug_pin.set_high().unwrap();
 
         let adc_coil_a: &AdcCoilAType = &cx.resources.adc_coil_a;
         if adc_coil_a.is_ready() {
@@ -337,15 +352,14 @@ const APP: () = {
 
             // used for delta time.
             *cx.resources.prev_time_coil_a = cx.start;
-            cx.resources.debug_pin.set_low().unwrap();
         }
-        // Only clear interrupt, not using yet, aslo needs to be generalised.
+
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
         if adc_coil_b.is_ready() {
             let adc_value = adc_coil_b.read_value() as u32;
 
             let adc_voltage = if adc_value > 0 {
-                ((3300 * adc_value) / adc_coil_a.max_sample() as u32) as i32
+                ((3300 * adc_value) / adc_coil_b.max_sample() as u32) as i32
             } else {
                 0
             };
@@ -365,7 +379,7 @@ const APP: () = {
         }
 
         // END mark
-        cx.resources.debug_pin.set_low().unwrap();
+        //cx.resources.debug_pin.set_low().unwrap();
     }
 
     #[task(binds = USART1, resources = [usart1, serial_commands, motor_control])]
@@ -400,14 +414,20 @@ const APP: () = {
         }
     }
 
-    #[idle(resources = [total_sleep_time])]
+    #[idle(resources = [total_sleep_time, /*debug_pin*/])] // PRIO = 0
     fn idle(mut cx: idle::Context) -> ! {
         loop {
             nop();
 
             cortex_m::interrupt::free(|_| {
+                // END mark
+                //cx.resources.debug_pin.set_low().unwrap();
+
                 let sleep = Instant::now();
                 rtfm::export::wfi();
+
+                // START mark
+                //cx.resources.debug_pin.set_high().unwrap();
 
                 cx.resources.total_sleep_time.lock(|total_time| {
                     *total_time += Instant::now().duration_since(sleep);
@@ -418,5 +438,6 @@ const APP: () = {
 
     extern "C" {
         fn EXTI0();
+        fn EXTI1();
     }
 };
