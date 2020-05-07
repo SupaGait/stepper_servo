@@ -7,11 +7,12 @@ mod display;
 mod position_input;
 
 // Imports
-use cortex_m::asm::nop;
+//use core::sync::atomic::{AtomicUsize, Ordering};
+//use cortex_m::asm::nop;
 use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
-use rtfm::cyccnt::{Duration, Instant, U32Ext, CYCCNT};
-use rtfm::Monotonic;
+use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
+//use rtfm::Monotonic;
 use stepper_servo_lib::{
     current_control::{CurrentControl, CurrentDevice, PIDControl},
     motor_control::MotorControl,
@@ -31,7 +32,8 @@ use stm32f1xx_hal::{
 const DWT_FREQ: u32 = 72_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 2;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
-const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1000;
+const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1_000;
+const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 1_000;
 const SHUNT_RESISTANCE: u32 = 400; //mOhms
 
 // Types
@@ -75,14 +77,12 @@ const APP: () = {
         display: DisplayType,
         usart1: Usart1Type,
         serial_commands: SerialCommands,
-        prev_time_coil_a: Instant,
-        prev_time_coil_b: Instant,
         debug_pin: gpiob::PB12<Output<PushPull>>,
         total_sleep_time: Duration,
         processor_usage: i32,
     }
 
-    #[init(schedule = [blink_led, update_motor, update_display, cpu_usage])]
+    #[init(schedule = [blink_led, update_motor, control_loop, update_display, cpu_usage])]
     fn init(cx: init::Context) -> init::LateResources {
         let peripherals = cx.device;
         let mut core = cx.core;
@@ -197,11 +197,6 @@ const APP: () = {
         .split();
         usart1.1.listen();
 
-        // Motor update
-        cx.schedule
-            .update_motor(cx.start + MOTOR_CONTROL_PERIOD.cycles())
-            .unwrap();
-
         let mut motor_control = MotorControl::new(current_control_coil_a, current_control_coil_b);
         motor_control.set_controller_p(0);
         motor_control.set_controller_i(1);
@@ -209,6 +204,16 @@ const APP: () = {
 
         // CPU usage
         cx.schedule.cpu_usage(cx.start + DWT_FREQ.cycles()).unwrap();
+
+        // Motor update
+        cx.schedule
+            .update_motor(cx.start + MOTOR_CONTROL_PERIOD.cycles())
+            .unwrap();
+
+        // control_loop update
+        cx.schedule
+            .control_loop(cx.start + CONTROL_LOOP_PERIOD.cycles())
+            .unwrap();
 
         // DEBUG
         let debug_pin = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
@@ -222,8 +227,6 @@ const APP: () = {
             display,
             usart1,
             serial_commands: SerialCommands::default(),
-            prev_time_coil_a: cx.start,
-            prev_time_coil_b: cx.start,
             debug_pin,
             total_sleep_time: Duration::from_cycles(0),
             processor_usage: 0,
@@ -234,10 +237,10 @@ const APP: () = {
         resources = [total_sleep_time, processor_usage])]
     fn cpu_usage(cx: cpu_usage::Context) {
         // Calc elapsed time
-        *cx.resources.processor_usage =
-            (100 - (100 * cx.resources.total_sleep_time.as_cycles()) / DWT_FREQ) as i32;
+        *cx.resources.processor_usage = (100.0
+            - (100.0 * cx.resources.total_sleep_time.as_cycles() as f32) / DWT_FREQ as f32)
+            as i32;
 
-        // Prepare for next iteration.
         *cx.resources.total_sleep_time = Duration::from_cycles(0);
 
         cx.schedule
@@ -323,9 +326,22 @@ const APP: () = {
             .unwrap();
     }
 
+    #[task(schedule = [control_loop], priority = 9,
+        resources = [motor_control])]
+    fn control_loop(mut cx: control_loop::Context) {
+        // Update the current loop
+        cx.resources
+            .motor_control
+            .lock(|m| m.update_control_loop(CONTROL_LOOP_PERIOD));
+
+        // Re-shedule
+        cx.schedule
+            .control_loop((cx.scheduled + CONTROL_LOOP_PERIOD.cycles()).into())
+            .unwrap();
+    }
+
     #[task(binds = ADC1_2, priority = 10,
-        resources = [ adc_coil_a, adc_coil_b, motor_control,
-        prev_time_coil_a, prev_time_coil_b, /*debug_pin*/])]
+        resources = [ adc_coil_a, adc_coil_b, motor_control,/*debug_pin*/])]
     fn handle_adc(cx: handle_adc::Context) {
         // START mark
         //cx.resources.debug_pin.set_high().unwrap();
@@ -340,18 +356,9 @@ const APP: () = {
                 0
             };
 
-            let delta_time = cx
-                .start
-                .duration_since(*cx.resources.prev_time_coil_a)
-                .as_cycles();
-
-            // Update the current loop
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_a().current_control();
-            current_control.update(delta_time, adc_value, adc_voltage);
-
-            // used for delta time.
-            *cx.resources.prev_time_coil_a = cx.start;
+            current_control.add_sample(adc_value, adc_voltage);
         }
 
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
@@ -364,18 +371,9 @@ const APP: () = {
                 0
             };
 
-            let delta_time = cx
-                .start
-                .duration_since(*cx.resources.prev_time_coil_b)
-                .as_cycles();
-
-            // Update the current loop
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_b().current_control();
-            current_control.update(delta_time, adc_value, adc_voltage);
-
-            // used for delta time.
-            *cx.resources.prev_time_coil_b = cx.start;
+            current_control.add_sample(adc_value, adc_voltage);
         }
 
         // END mark
@@ -414,20 +412,18 @@ const APP: () = {
         }
     }
 
-    #[idle(resources = [total_sleep_time, /*debug_pin*/])] // PRIO = 0
+    #[idle(resources = [total_sleep_time, debug_pin])] // PRIO = 0
     fn idle(mut cx: idle::Context) -> ! {
         loop {
-            nop();
-
             cortex_m::interrupt::free(|_| {
                 // END mark
-                //cx.resources.debug_pin.set_low().unwrap();
+                cx.resources.debug_pin.set_low().unwrap();
 
                 let sleep = Instant::now();
                 rtfm::export::wfi();
 
                 // START mark
-                //cx.resources.debug_pin.set_high().unwrap();
+                cx.resources.debug_pin.set_high().unwrap();
 
                 cx.resources.total_sleep_time.lock(|total_time| {
                     *total_time += Instant::now().duration_since(sleep);
@@ -439,5 +435,6 @@ const APP: () = {
     extern "C" {
         fn EXTI0();
         fn EXTI1();
+        fn EXTI2();
     }
 };
