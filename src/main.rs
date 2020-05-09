@@ -9,7 +9,7 @@ mod position_input;
 // Imports
 //use core::sync::atomic::{AtomicUsize, Ordering};
 //use cortex_m::asm::nop;
-use embedded_hal::digital::v2::OutputPin;
+//use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
 //use rtfm::Monotonic;
@@ -33,7 +33,7 @@ const DWT_FREQ: u32 = 72_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 2;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
 const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1_000;
-const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 1_000;
+const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 30_000;
 const SHUNT_RESISTANCE: u32 = 400; //mOhms
 
 // Types
@@ -199,7 +199,7 @@ const APP: () = {
 
         let mut motor_control = MotorControl::new(current_control_coil_a, current_control_coil_b);
         motor_control.set_controller_p(0);
-        motor_control.set_controller_i(1);
+        motor_control.set_controller_i(20);
         motor_control.set_controller_d(0);
 
         // CPU usage
@@ -265,7 +265,7 @@ const APP: () = {
         cx.resources
             .motor_control
             .lock(|m| next_call_us = m.update());
-        let next_call_cycles = next_call_us * 8; // @ 72_000_000 hz
+        let next_call_cycles = next_call_us; // @ 72_000_000 hz
 
         cx.schedule
             .update_motor(cx.scheduled + Duration::from_cycles(next_call_cycles))
@@ -408,6 +408,9 @@ const APP: () = {
                 .resources
                 .motor_control
                 .lock(|m| m.set_controller_d(value)),
+            Some(Command::ForceDuty(duty)) => {
+                cx.resources.motor_control.lock(|m| m.force_duty(duty))
+            }
             None => (),
         }
     }
@@ -417,13 +420,13 @@ const APP: () = {
         loop {
             cortex_m::interrupt::free(|_| {
                 // END mark
-                cx.resources.debug_pin.set_low().unwrap();
+                //cx.resources.debug_pin.set_low().unwrap();
 
                 let sleep = Instant::now();
                 rtfm::export::wfi();
 
                 // START mark
-                cx.resources.debug_pin.set_high().unwrap();
+                //cx.resources.debug_pin.set_high().unwrap();
 
                 cx.resources.total_sleep_time.lock(|total_time| {
                     *total_time += Instant::now().duration_since(sleep);
