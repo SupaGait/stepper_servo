@@ -100,7 +100,7 @@ const APP: () = {
             .hclk(72.mhz())
             .pclk1(36.mhz())
             .pclk2(36.mhz())
-            .adcclk(2.mhz()) // Depends on pclk2(max/8) // 2.000.000 / ADC 250-cycles = 8.000Hz ... 36/8 = 4.5Mhz/250 = 18.000Hz
+            .adcclk(8.mhz()) // 8.000.000 / ADC:~250cycles = 36khz.
             .freeze(&mut flash.acr);
 
         // Enable the monotonic timer CYCCNT
@@ -207,7 +207,7 @@ const APP: () = {
 
         let mut motor_control = MotorControl::new(current_control_coil_a, current_control_coil_b);
         motor_control.set_controller_p(0);
-        motor_control.set_controller_i(20);
+        motor_control.set_controller_i(7);
         motor_control.set_controller_d(0);
 
         // CPU usage
@@ -349,13 +349,13 @@ const APP: () = {
     }
 
     #[task(binds = ADC1_2, priority = 10,
-        resources = [ adc_coil_a, adc_coil_b, motor_control,/*debug_pin*/])]
+        resources = [ adc_coil_a, adc_coil_b, motor_control, debug_pin])]
     fn handle_adc(cx: handle_adc::Context) {
-        // START mark
-        //cx.resources.debug_pin.set_high().unwrap();
-
         let adc_coil_a: &AdcCoilAType = &cx.resources.adc_coil_a;
         if adc_coil_a.is_ready() {
+            // END mark
+            //cx.resources.debug_pin.set_low().unwrap();
+
             let adc_value = adc_coil_a.read_value() as u32;
 
             // Remove offset
@@ -365,6 +365,9 @@ const APP: () = {
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_a().current_control();
             current_control.add_sample(adc_value);
+
+            // START mark
+            //cx.resources.debug_pin.set_high().unwrap();
         }
 
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
@@ -379,9 +382,6 @@ const APP: () = {
             let current_control = motor_control.coil_b().current_control();
             current_control.add_sample(adc_value);
         }
-
-        // END mark
-        //cx.resources.debug_pin.set_low().unwrap();
     }
 
     #[task(binds = USART1, resources = [usart1, serial_commands, motor_control])]
