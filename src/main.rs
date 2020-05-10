@@ -33,7 +33,7 @@ const DWT_FREQ: u32 = 72_000_000;
 const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 2;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
 const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1_000;
-const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 30_000;
+const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 20_000;
 const SHUNT_RESISTANCE: u32 = 400; //mOhms
 
 // Types
@@ -100,7 +100,7 @@ const APP: () = {
             .hclk(72.mhz())
             .pclk1(36.mhz())
             .pclk2(36.mhz())
-            .adcclk(2.mhz()) // Depends on pclk2
+            .adcclk(2.mhz()) // Depends on pclk2(max/8) // 2.000.000 / ADC 250-cycles = 8.000Hz ... 36/8 = 4.5Mhz/250 = 18.000Hz
             .freeze(&mut flash.acr);
 
         // Enable the monotonic timer CYCCNT
@@ -134,7 +134,11 @@ const APP: () = {
         let in1 = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
         let in2 = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
         let current_output = CurrentOutputCoilAType::new(pwm_coil_a, in1, in2);
-        let current_control_coil_a = CurrentControl::new(SHUNT_RESISTANCE, current_output);
+        let current_control_coil_a = CurrentControl::new(
+            SHUNT_RESISTANCE,
+            current_output,
+            adc_coil_a.max_sample() as u32,
+        );
 
         // Current Control - Coil B - ADC
         let ch0 = gpiob.pb1.into_analog(&mut gpiob.crl);
@@ -147,7 +151,11 @@ const APP: () = {
         let in1 = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
         let in2 = gpioa.pa5.into_push_pull_output(&mut gpioa.crl);
         let current_output = CurrentOutputCoilBType::new(pwm_coil_b, in1, in2);
-        let current_control_coil_b = CurrentControl::new(SHUNT_RESISTANCE, current_output);
+        let current_control_coil_b = CurrentControl::new(
+            SHUNT_RESISTANCE,
+            current_output,
+            adc_coil_b.max_sample() as u32,
+        );
 
         // Position control
         let pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
@@ -350,30 +358,26 @@ const APP: () = {
         if adc_coil_a.is_ready() {
             let adc_value = adc_coil_a.read_value() as u32;
 
-            let adc_voltage = if adc_value > 0 {
-                ((3300 * adc_value) / adc_coil_a.max_sample() as u32) as i32
-            } else {
-                0
-            };
+            // Remove offset
+            let ADC_Offset = 15;
+            let adc_value = (adc_value as i32 - ADC_Offset).max(0) as u32;
 
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_a().current_control();
-            current_control.add_sample(adc_value, adc_voltage);
+            current_control.add_sample(adc_value);
         }
 
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
         if adc_coil_b.is_ready() {
             let adc_value = adc_coil_b.read_value() as u32;
 
-            let adc_voltage = if adc_value > 0 {
-                ((3300 * adc_value) / adc_coil_b.max_sample() as u32) as i32
-            } else {
-                0
-            };
+            // Remove offset
+            let ADC_Offset = 15;
+            let adc_value = (adc_value as i32 - ADC_Offset).max(0) as u32;
 
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_b().current_control();
-            current_control.add_sample(adc_value, adc_voltage);
+            current_control.add_sample(adc_value);
         }
 
         // END mark
