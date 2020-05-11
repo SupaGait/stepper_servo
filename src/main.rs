@@ -20,8 +20,7 @@ use stepper_servo_lib::{
 };
 use stm32f1xx_hal::{
     adc, device,
-    gpio::{gpioa, gpiob, gpioc},
-    gpio::{Alternate, Input, OpenDrain, Output, PullUp, PushPull},
+    gpio::*,
     i2c::{BlockingI2c, DutyCycle, Mode},
     prelude::*,
     pwm,
@@ -158,9 +157,15 @@ const APP: () = {
         );
 
         // Position control
-        let pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
-        let pin_b = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
-        let position_control = position_input::PositionInput::new(pin_a, pin_b);
+        let mut position_pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
+        position_pin_a.make_interrupt_source(&mut afio);
+        position_pin_a.trigger_on_edge(&peripherals.EXTI, Edge::RISING_FALLING);
+        position_pin_a.enable_interrupt(&peripherals.EXTI);
+        let mut position_pin_b = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
+        position_pin_b.make_interrupt_source(&mut afio);
+        position_pin_b.trigger_on_edge(&peripherals.EXTI, Edge::RISING_FALLING);
+        position_pin_b.enable_interrupt(&peripherals.EXTI);
+        let position_control = position_input::PositionInput::new(position_pin_a, position_pin_b);
 
         // Led
         let onboard_led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
@@ -280,7 +285,7 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(schedule = [update_display], resources = [display, motor_control, processor_usage])]
+    #[task(schedule = [update_display], resources = [display, motor_control, processor_usage, position_control])]
     fn update_display(mut cx: update_display::Context) {
         let (mut adc_value, mut voltage, mut current, mut duty_cycle): (i32, i32, i32, i32) =
             Default::default();
@@ -327,6 +332,15 @@ const APP: () = {
         cx.resources
             .display
             .update_row_column("Cpu", 7, 0, processor_usage);
+
+        // Pos
+        let mut position = 0;
+        cx.resources
+            .position_control
+            .lock(|p| position = p.get_position());
+        cx.resources
+            .display
+            .update_row_column("Pos", 7, 8, position);
 
         // Re-shedule
         cx.schedule
@@ -400,6 +414,9 @@ const APP: () = {
             Some(Command::Cur { current }) => {
                 cx.resources.motor_control.lock(|m| m.set_current(current))
             }
+            Some(Command::Position(value)) => {
+                cx.resources.motor_control.lock(|m| m.set_position(value))
+            }
             Some(Command::P(value)) => cx
                 .resources
                 .motor_control
@@ -439,9 +456,40 @@ const APP: () = {
         }
     }
 
+    #[task(binds = EXTI15_10, priority = 11,
+        resources = [ position_control])]
+    fn position_control_input(cx: position_control_input::Context) {
+        cx.resources.position_control.update();
+    }
+
+    #[task(binds = EXTI1, priority = 11,
+        resources = [ position_control])]
+    fn ext1(cx: ext1::Context) {
+        cx.resources.position_control.update();
+    }
+
+    #[task(binds = EXTI2, priority = 11,
+        resources = [ position_control])]
+    fn ext2(cx: ext2::Context) {
+        cx.resources.position_control.update();
+    }
+
+    #[task(binds = EXTI3, priority = 11,
+        resources = [ position_control])]
+    fn ext3(cx: ext3::Context) {
+        cx.resources.position_control.update();
+    }
+
+    #[task(binds = EXTI4, priority = 11,
+        resources = [ position_control])]
+    fn ext4(cx: ext4::Context) {
+        cx.resources.position_control.update();
+    }
+
     extern "C" {
-        fn EXTI0();
-        fn EXTI1();
-        fn EXTI2();
+        // used interrupts for SW sheduling.
+        fn DMA1_CHANNEL1();
+        fn DMA1_CHANNEL2();
+        fn DMA1_CHANNEL3();
     }
 };

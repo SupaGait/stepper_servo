@@ -1,44 +1,78 @@
 use embedded_hal as hal;
 use hal::digital::v2::InputPin;
-use rotary_encoder_hal::{Direction, Rotary};
+use stm32f1xx_hal::gpio::*;
+
+const MAX_VALUE: i32 = 10_000;
+const MIN_VALUE: i32 = -10_000;
 
 pub struct PositionInput<A, B> {
-    rotary: Rotary<A, B>,
-    position: isize,
+    pin_a: A,
+    pin_b: B,
+    pin_a_state: bool,
+    pin_b_state: bool,
+    position: i32,
 }
 
 impl<A, B> PositionInput<A, B>
 where
-    A: InputPin,
-    B: InputPin,
+    A: InputPin + ExtiPin,
+    B: InputPin + ExtiPin,
 {
     pub fn new(pin_a: A, pin_b: B) -> Self {
         Self {
-            rotary: Rotary::new(pin_a, pin_b),
+            pin_a,
+            pin_b,
+            pin_a_state: false,
+            pin_b_state: false,
             position: 0,
         }
     }
+    pub fn get_position(&self) -> i32 {
+        self.position
+    }
+
+    //        | A_up | A_down |  B_up | B_down |
+    //        ---------------------------------
+    // A_up   |  X   |   X    |   I   |   D    |
+    // A_down |  X   |   X    |   D   |   I    |
+    // B_up   |  D   |   I    |   X   |   X    |
+    // B_down |  I   |   D    |   X   |   X    |
+    //        ----------------------------------
     pub fn update(&mut self) {
-        match self.rotary.update() {
-            Ok(direction) => match direction {
-                Direction::Clockwise => {
-                    self.position += 1;
-                }
-                Direction::CounterClockwise => {
-                    self.position -= 1;
-                }
-                Direction::None => {}
-            },
-            Err(_) => {}
+        if self.pin_a.check_interrupt() {
+            self.pin_a.clear_interrupt_pending_bit();
+
+            self.pin_a_state = self.pin_a.is_high().ok().unwrap();
+            if self.pin_a_state == self.pin_b_state {
+                self.increase();
+            } else {
+                self.decrement();
+            }
         }
-        // match self.rotary.update().unwrap() {
-        //     Direction::Clockwise => {
-        //         self.position += 1;
-        //     }
-        //     Direction::CounterClockwise => {
-        //         self.position -= 1;
-        //     }
-        //     Direction::None => {}
-        // }
+        if self.pin_b.check_interrupt() {
+            self.pin_b.clear_interrupt_pending_bit();
+
+            self.pin_b_state = self.pin_b.is_high().ok().unwrap();
+            if self.pin_a_state == self.pin_b_state {
+                self.decrement();
+            } else {
+                self.increase();
+            }
+        }
+    }
+
+    fn increase(&mut self) {
+        self.position = if self.position < MAX_VALUE {
+            self.position + 1
+        } else {
+            MIN_VALUE
+        }
+    }
+    fn decrement(&mut self) {
+        self.position = if self.position > MIN_VALUE {
+            self.position - 1
+        } else {
+            MAX_VALUE
+        }
     }
 }
