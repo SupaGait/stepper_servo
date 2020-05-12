@@ -2,6 +2,8 @@ use embedded_hal as hal;
 use hal::digital::v2::InputPin;
 use stm32f1xx_hal::gpio::*;
 
+use stepper_servo_lib::motor_control;
+
 const MAX_VALUE: i32 = 10_000;
 const MIN_VALUE: i32 = -10_000;
 
@@ -11,6 +13,11 @@ pub struct PositionInput<A, B> {
     pin_a_state: bool,
     pin_b_state: bool,
     position: i32,
+}
+impl<A, B> motor_control::PositionInput for PositionInput<A, B> {
+    fn get_position(&self) -> i32 {
+        self.position
+    }
 }
 
 impl<A, B> PositionInput<A, B>

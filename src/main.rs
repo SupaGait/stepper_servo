@@ -13,6 +13,8 @@ mod position_input;
 use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
 //use rtfm::Monotonic;
+use core::fmt::Write;
+use nb;
 use stepper_servo_lib::{
     current_control::{CurrentControl, CurrentDevice, PIDControl},
     motor_control::MotorControl,
@@ -48,10 +50,13 @@ type CurrentOutputCoilBType = current_output::CurrentOuput<
     gpioa::PA4<Output<PushPull>>,
     gpioa::PA5<Output<PushPull>>,
 >;
-type MotorControlType =
-    MotorControl<CurrentControl<CurrentOutputCoilAType>, CurrentControl<CurrentOutputCoilBType>>;
 type PositionControlType =
     position_input::PositionInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
+type MotorControlType = MotorControl<
+    CurrentControl<CurrentOutputCoilAType>,
+    CurrentControl<CurrentOutputCoilBType>,
+    PositionControlType,
+>;
 type DisplayType = display::Display<
     ssd1306::interface::i2c::I2cInterface<
         BlockingI2c<
@@ -71,7 +76,6 @@ const APP: () = {
         adc_coil_a: AdcCoilAType,
         adc_coil_b: AdcCoilBType,
         motor_control: MotorControlType,
-        position_control: PositionControlType,
         onboard_led: gpioc::PC13<Output<PushPull>>,
         display: DisplayType,
         usart1: Usart1Type,
@@ -210,7 +214,11 @@ const APP: () = {
         .split();
         usart1.1.listen();
 
-        let mut motor_control = MotorControl::new(current_control_coil_a, current_control_coil_b);
+        let mut motor_control = MotorControl::new(
+            current_control_coil_a,
+            current_control_coil_b,
+            position_control,
+        );
         motor_control.set_controller_p(0);
         motor_control.set_controller_i(7);
         motor_control.set_controller_d(0);
@@ -235,7 +243,6 @@ const APP: () = {
             adc_coil_a,
             adc_coil_b,
             motor_control,
-            position_control,
             onboard_led,
             display,
             usart1,
@@ -273,19 +280,18 @@ const APP: () = {
     #[task(schedule = [update_motor],  priority = 5,
         resources = [motor_control])]
     fn update_motor(mut cx: update_motor::Context) {
-        // Returns nex required update in uS
+        // Returns nex required update in cycles
         let mut next_call_us = 0;
         cx.resources
             .motor_control
             .lock(|m| next_call_us = m.update());
-        let next_call_cycles = next_call_us; // @ 72_000_000 hz
 
         cx.schedule
-            .update_motor(cx.scheduled + Duration::from_cycles(next_call_cycles))
+            .update_motor(cx.scheduled + Duration::from_cycles(next_call_us))
             .unwrap();
     }
 
-    #[task(schedule = [update_display], resources = [display, motor_control, processor_usage, position_control])]
+    #[task(schedule = [update_display], resources = [display, motor_control, processor_usage])]
     fn update_display(mut cx: update_display::Context) {
         let (mut adc_value, mut voltage, mut current, mut duty_cycle): (i32, i32, i32, i32) =
             Default::default();
@@ -336,8 +342,8 @@ const APP: () = {
         // Pos
         let mut position = 0;
         cx.resources
-            .position_control
-            .lock(|p| position = p.get_position());
+            .motor_control
+            .lock(|m| position = m.position_input().get_position());
         cx.resources
             .display
             .update_row_column("Pos", 7, 8, position);
@@ -400,17 +406,18 @@ const APP: () = {
 
     #[task(binds = USART1, resources = [usart1, serial_commands, motor_control])]
     fn handle_usart1(mut cx: handle_usart1::Context) {
-        let (_tx, rx): &mut Usart1Type = cx.resources.usart1;
+        let (tx, rx): &mut Usart1Type = cx.resources.usart1;
         let serial_commands: &mut SerialCommands = cx.resources.serial_commands;
 
         let data = rx.read().unwrap();
         serial_commands.add_character(data);
 
-        match serial_commands.get_command() {
+        let command = serial_commands.get_command();
+        match command {
             Some(Command::Enable) => cx.resources.motor_control.lock(|m| m.enable(true)),
             Some(Command::Disable) => cx.resources.motor_control.lock(|m| m.enable(false)),
-            Some(Command::Run { speed }) => cx.resources.motor_control.lock(|m| m.rotate(speed)),
-            Some(Command::Hold) => cx.resources.motor_control.lock(|m| m.hold(true)),
+            Some(Command::Rotate { speed }) => cx.resources.motor_control.lock(|m| m.rotate(speed)),
+            Some(Command::Hold) => cx.resources.motor_control.lock(|m| m.hold()),
             Some(Command::Cur { current }) => {
                 cx.resources.motor_control.lock(|m| m.set_current(current))
             }
@@ -434,6 +441,14 @@ const APP: () = {
             }
             None => (),
         }
+
+        // Feedback
+        if command.is_some() {
+            write!(tx, " > OK").ok();
+        }
+        nb::block!(tx.flush()).ok();
+        nb::block!(tx.write(data)).ok();
+        nb::block!(tx.flush()).ok();
     }
 
     #[idle(resources = [total_sleep_time, debug_pin])] // PRIO = 0
@@ -456,34 +471,10 @@ const APP: () = {
         }
     }
 
-    #[task(binds = EXTI15_10, priority = 11,
-        resources = [ position_control])]
+    #[task(binds = EXTI15_10, priority = 10,
+        resources = [ motor_control])]
     fn position_control_input(cx: position_control_input::Context) {
-        cx.resources.position_control.update();
-    }
-
-    #[task(binds = EXTI1, priority = 11,
-        resources = [ position_control])]
-    fn ext1(cx: ext1::Context) {
-        cx.resources.position_control.update();
-    }
-
-    #[task(binds = EXTI2, priority = 11,
-        resources = [ position_control])]
-    fn ext2(cx: ext2::Context) {
-        cx.resources.position_control.update();
-    }
-
-    #[task(binds = EXTI3, priority = 11,
-        resources = [ position_control])]
-    fn ext3(cx: ext3::Context) {
-        cx.resources.position_control.update();
-    }
-
-    #[task(binds = EXTI4, priority = 11,
-        resources = [ position_control])]
-    fn ext4(cx: ext4::Context) {
-        cx.resources.position_control.update();
+        cx.resources.motor_control.position_input().update();
     }
 
     extern "C" {
