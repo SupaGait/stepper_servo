@@ -220,7 +220,7 @@ const APP: () = {
             position_control,
         );
         motor_control.set_controller_p(0);
-        motor_control.set_controller_i(7);
+        motor_control.set_controller_i(20);
         motor_control.set_controller_d(0);
 
         // CPU usage
@@ -421,9 +421,10 @@ const APP: () = {
             Some(Command::Cur { current }) => {
                 cx.resources.motor_control.lock(|m| m.set_current(current))
             }
-            Some(Command::Position(value)) => {
-                cx.resources.motor_control.lock(|m| m.set_position(value))
-            }
+            Some(Command::Position { position, speed }) => cx.resources.motor_control.lock(|m| {
+                m.set_position(position);
+                m.set_speed(speed)
+            }),
             Some(Command::P(value)) => cx
                 .resources
                 .motor_control
