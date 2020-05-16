@@ -2,25 +2,30 @@ use embedded_hal as hal;
 use hal::digital::v2::InputPin;
 use stm32f1xx_hal::gpio::*;
 
-use stepper_servo_lib::motor_control;
+use stepper_servo_lib::position_control::{Direction, PositionInput};
 
 const MAX_VALUE: i32 = 10_000;
 const MIN_VALUE: i32 = -10_000;
 
-pub struct PositionInput<A, B> {
+
+pub struct EncoderInput<A, B> {
     pin_a: A,
     pin_b: B,
     pin_a_state: bool,
     pin_b_state: bool,
     position: i32,
+    direction: Direction,
 }
-impl<A, B> motor_control::PositionInput for PositionInput<A, B> {
+impl<A, B> PositionInput for EncoderInput<A, B> {
     fn get_position(&self) -> i32 {
         self.position
     }
+    fn get_direction(&self) -> Direction {
+        self.direction
+    }
 }
 
-impl<A, B> PositionInput<A, B>
+impl<A, B> EncoderInput<A, B>
 where
     A: InputPin + ExtiPin,
     B: InputPin + ExtiPin,
@@ -32,10 +37,14 @@ where
             pin_a_state: false,
             pin_b_state: false,
             position: 0,
+            direction: Direction::Unknown(0),
         }
     }
     pub fn get_position(&self) -> i32 {
         self.position
+    }
+    pub fn get_direction(&self) -> Direction {
+        self.direction
     }
 
     //        | A_up | A_down |  B_up | B_down |
@@ -73,13 +82,15 @@ where
             self.position + 1
         } else {
             MIN_VALUE
-        }
+        };
+        self.direction = Direction::Increased(self.position);
     }
     fn decrement(&mut self) {
         self.position = if self.position > MIN_VALUE {
             self.position - 1
         } else {
             MAX_VALUE
-        }
+        };
+        self.direction = Direction::Decreased(self.position);
     }
 }

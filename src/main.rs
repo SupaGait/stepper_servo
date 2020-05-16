@@ -4,7 +4,7 @@
 // Local modules
 mod current_output;
 mod display;
-mod position_input;
+mod encoder_input;
 
 // Imports
 //use core::sync::atomic::{AtomicUsize, Ordering};
@@ -51,7 +51,7 @@ type CurrentOutputCoilBType = current_output::CurrentOuput<
     gpioa::PA5<Output<PushPull>>,
 >;
 type PositionControlType =
-    position_input::PositionInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
+    encoder_input::EncoderInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
 type MotorControlType = MotorControl<
     CurrentControl<CurrentOutputCoilAType>,
     CurrentControl<CurrentOutputCoilBType>,
@@ -169,7 +169,7 @@ const APP: () = {
         position_pin_b.make_interrupt_source(&mut afio);
         position_pin_b.trigger_on_edge(&peripherals.EXTI, Edge::RISING_FALLING);
         position_pin_b.enable_interrupt(&peripherals.EXTI);
-        let position_control = position_input::PositionInput::new(position_pin_a, position_pin_b);
+        let position_control = encoder_input::EncoderInput::new(position_pin_a, position_pin_b);
 
         // Led
         let onboard_led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
