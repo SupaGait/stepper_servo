@@ -7,7 +7,6 @@ use stepper_servo_lib::position_control::{Direction, PositionInput};
 const MAX_VALUE: i32 = 10_000;
 const MIN_VALUE: i32 = -10_000;
 
-
 pub struct EncoderInput<A, B> {
     pin_a: A,
     pin_b: B,
@@ -16,37 +15,18 @@ pub struct EncoderInput<A, B> {
     position: i32,
     direction: Direction,
 }
-impl<A, B> PositionInput for EncoderInput<A, B> {
+
+impl<A, B> PositionInput for EncoderInput<A, B>
+where
+    A: InputPin + ExtiPin,
+    B: InputPin + ExtiPin,
+{
     fn get_position(&self) -> i32 {
         self.position
     }
     fn get_direction(&self) -> Direction {
         self.direction
     }
-}
-
-impl<A, B> EncoderInput<A, B>
-where
-    A: InputPin + ExtiPin,
-    B: InputPin + ExtiPin,
-{
-    pub fn new(pin_a: A, pin_b: B) -> Self {
-        Self {
-            pin_a,
-            pin_b,
-            pin_a_state: false,
-            pin_b_state: false,
-            position: 0,
-            direction: Direction::Unknown(0),
-        }
-    }
-    pub fn get_position(&self) -> i32 {
-        self.position
-    }
-    pub fn get_direction(&self) -> Direction {
-        self.direction
-    }
-
     //        | A_up | A_down |  B_up | B_down |
     //        ---------------------------------
     // A_up   |  X   |   X    |   I   |   D    |
@@ -54,7 +34,7 @@ where
     // B_up   |  D   |   I    |   X   |   X    |
     // B_down |  I   |   D    |   X   |   X    |
     //        ----------------------------------
-    pub fn update(&mut self) {
+    fn update(&mut self) {
         if self.pin_a.check_interrupt() {
             self.pin_a.clear_interrupt_pending_bit();
 
@@ -74,6 +54,27 @@ where
             } else {
                 self.increase();
             }
+        }
+    }
+    fn reset(&mut self) {
+        self.direction = Direction::Unknown(0);
+        self.position = 0;
+    }
+}
+
+impl<A, B> EncoderInput<A, B>
+where
+    A: InputPin + ExtiPin,
+    B: InputPin + ExtiPin,
+{
+    pub fn new(pin_a: A, pin_b: B) -> Self {
+        Self {
+            pin_a,
+            pin_b,
+            pin_a_state: false,
+            pin_b_state: false,
+            position: 0,
+            direction: Direction::Unknown(0),
         }
     }
 

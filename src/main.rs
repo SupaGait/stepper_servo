@@ -343,10 +343,8 @@ const APP: () = {
         let mut position = 0;
         cx.resources
             .motor_control
-            .lock(|m| position = m.position_input().get_position());
-        cx.resources
-            .display
-            .update_row_column("Pos", 7, 8, position);
+            .lock(|m| position = m.position_control().get_current_position());
+        cx.resources.display.update_row_column("P", 7, 8, position);
 
         // Re-shedule
         cx.schedule
@@ -421,10 +419,18 @@ const APP: () = {
             Some(Command::Cur { current }) => {
                 cx.resources.motor_control.lock(|m| m.set_current(current))
             }
-            Some(Command::Position { position, speed }) => cx.resources.motor_control.lock(|m| {
+            Some(Command::Position { position }) => cx.resources.motor_control.lock(|m| {
                 m.set_position(position);
-                m.set_speed(speed)
             }),
+            Some(Command::Speed { speed }) => cx.resources.motor_control.lock(|m| {
+                m.set_speed(speed);
+            }),
+            Some(Command::PositionAndSpeed { position, speed }) => {
+                cx.resources.motor_control.lock(|m| {
+                    m.set_position(position);
+                    m.set_speed(speed);
+                })
+            }
             Some(Command::P(value)) => cx
                 .resources
                 .motor_control
@@ -437,6 +443,7 @@ const APP: () = {
                 .resources
                 .motor_control
                 .lock(|m| m.set_controller_d(value)),
+            Some(Command::Calibrate) => cx.resources.motor_control.lock(|m| m.calibrate()),
             Some(Command::ForceDuty(duty)) => {
                 cx.resources.motor_control.lock(|m| m.force_duty(duty))
             }
@@ -475,7 +482,7 @@ const APP: () = {
     #[task(binds = EXTI15_10, priority = 10,
         resources = [ motor_control])]
     fn position_control_input(cx: position_control_input::Context) {
-        cx.resources.motor_control.position_input().update();
+        cx.resources.motor_control.handle_new_position();
     }
 
     extern "C" {
