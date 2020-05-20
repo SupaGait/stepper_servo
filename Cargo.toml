@@ -13,7 +13,7 @@ lto = true
 #opt-level = 's'
 
 [profile.dev]
-opt-level = 1
+opt-level = 's'
 #lto = true
 
 [dependencies]
@@ -22,8 +22,7 @@ embedded-hal = "0.2.3"
 cortex-m = "0.6.2"
 # provides startup code for the ARM CPU
 cortex-m-rt = "0.6.11"
-# provies a panic-handler (halting cpu)
-# (required when not using stdlib)
+#panic-semihosting = "0.5.3"
 panic-halt = "0.2.0"
 # Higher level drivers/functionality
 cortex-m-rtfm = "0.5.1"

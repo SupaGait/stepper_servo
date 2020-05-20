@@ -11,6 +11,7 @@ mod encoder_input;
 //use cortex_m::asm::nop;
 //use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
+//use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
 //use rtfm::Monotonic;
 use core::fmt::Write;
@@ -18,6 +19,7 @@ use nb;
 use stepper_servo_lib::{
     current_control::{CurrentControl, CurrentDevice, PIDControl},
     motor_control::MotorControl,
+    position_control::Debug_calibration_data,
     serial_commands::{Command, SerialCommands},
 };
 use stm32f1xx_hal::{
@@ -444,6 +446,22 @@ const APP: () = {
                 .motor_control
                 .lock(|m| m.set_controller_d(value)),
             Some(Command::Calibrate) => cx.resources.motor_control.lock(|m| m.calibrate()),
+            Some(Command::ShowCalData) => cx.resources.motor_control.lock(|m| {
+                let cal_data = m.position_control().get_calibration_data();
+                for data in &mut cal_data.pulse_at_angle.iter() {
+                    write!(tx, "{}\r\n", data).ok();
+                    nb::block!(tx.flush()).ok();
+                }
+                write!(tx, "\r\n---------\r\n").ok();
+                nb::block!(tx.flush()).ok();
+
+                for (step, row) in &mut cal_data.position_at_cal_step.iter().enumerate() {
+                    for (angle_step, position) in row.iter().enumerate() {
+                        write!(tx, "{},{},{}\r\n", step, angle_step, position).ok();
+                        nb::block!(tx.flush()).ok();
+                    }
+                }
+            }),
             Some(Command::ForceDuty(duty)) => {
                 cx.resources.motor_control.lock(|m| m.force_duty(duty))
             }
