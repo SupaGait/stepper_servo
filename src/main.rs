@@ -209,7 +209,7 @@ const APP: () = {
             peripherals.USART1,
             (tx, rx),
             &mut afio.mapr,
-            Config::default().baudrate(9600.bps()),
+            Config::default().baudrate(115200.bps()),
             clocks,
             &mut rcc.apb2,
         )
@@ -449,15 +449,15 @@ const APP: () = {
             Some(Command::ShowCalData) => cx.resources.motor_control.lock(|m| {
                 let cal_data = m.position_control().get_calibration_data();
                 for data in &mut cal_data.pulse_at_angle.iter() {
-                    write!(tx, "{}\r\n", data).ok();
+                    write!(tx, "{}\n", data).ok();
                     nb::block!(tx.flush()).ok();
                 }
-                write!(tx, "\r\n---------\r\n").ok();
+                write!(tx, "\n---------\n").ok();
                 nb::block!(tx.flush()).ok();
 
                 for (step, row) in &mut cal_data.position_at_cal_step.iter().enumerate() {
                     for (angle_step, position) in row.iter().enumerate() {
-                        write!(tx, "{},{},{}\r\n", step, angle_step, position).ok();
+                        write!(tx, "{},{},{}\n", step, angle_step, position).ok();
                         nb::block!(tx.flush()).ok();
                     }
                 }
@@ -473,7 +473,11 @@ const APP: () = {
             write!(tx, " > OK").ok();
         }
         nb::block!(tx.flush()).ok();
-        nb::block!(tx.write(data)).ok();
+        if data == b'\r' {
+            write!(tx, "\n").ok();
+        } else {
+            nb::block!(tx.write(data)).ok();
+        }
         nb::block!(tx.flush()).ok();
     }
 
