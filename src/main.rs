@@ -9,7 +9,7 @@ mod encoder_input;
 // Imports
 //use core::sync::atomic::{AtomicUsize, Ordering};
 //use cortex_m::asm::nop;
-//use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
 //use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
@@ -19,7 +19,6 @@ use nb;
 use stepper_servo_lib::{
     current_control::{CurrentControl, CurrentDevice, PIDControl},
     motor_control::MotorControl,
-    position_control::Debug_calibration_data,
     serial_commands::{Command, SerialCommands},
 };
 use stm32f1xx_hal::{
@@ -37,7 +36,10 @@ const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 2;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
 const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1_000;
 const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 20_000;
-const SHUNT_RESISTANCE: u32 = 400; //mOhms
+
+const SHUNT_RESISTANCE: u32 = 220; //mOhms
+const ADC_1_OFFSET: u32 = 125; //bits
+const ADC_2_OFFSET: u32 = 115; //bits
 
 // Types
 type AdcCoilAType = adc::AdcInt<device::ADC1>;
@@ -142,6 +144,7 @@ const APP: () = {
         let current_control_coil_a = CurrentControl::new(
             SHUNT_RESISTANCE,
             current_output,
+            ADC_1_OFFSET,
             adc_coil_a.max_sample() as u32,
         );
 
@@ -159,6 +162,7 @@ const APP: () = {
         let current_control_coil_b = CurrentControl::new(
             SHUNT_RESISTANCE,
             current_output,
+            ADC_2_OFFSET,
             adc_coil_b.max_sample() as u32,
         );
 
@@ -375,13 +379,7 @@ const APP: () = {
         if adc_coil_a.is_ready() {
             // END mark
             //cx.resources.debug_pin.set_low().unwrap();
-
             let adc_value = adc_coil_a.read_value() as u32;
-
-            // Remove offset
-            let ADC_Offset = 15;
-            let adc_value = (adc_value as i32 - ADC_Offset).max(0) as u32;
-
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_a().current_control();
             current_control.add_sample(adc_value);
@@ -393,11 +391,6 @@ const APP: () = {
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
         if adc_coil_b.is_ready() {
             let adc_value = adc_coil_b.read_value() as u32;
-
-            // Remove offset
-            let ADC_Offset = 15;
-            let adc_value = (adc_value as i32 - ADC_Offset).max(0) as u32;
-
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_b().current_control();
             current_control.add_sample(adc_value);
@@ -481,7 +474,7 @@ const APP: () = {
         nb::block!(tx.flush()).ok();
     }
 
-    #[idle(resources = [total_sleep_time, debug_pin])] // PRIO = 0
+    #[idle(resources = [total_sleep_time, /*debug_pin*/])] // PRIO = 0
     fn idle(mut cx: idle::Context) -> ! {
         loop {
             cortex_m::interrupt::free(|_| {
@@ -502,9 +495,15 @@ const APP: () = {
     }
 
     #[task(binds = EXTI15_10, priority = 10,
-        resources = [ motor_control])]
+        resources = [ motor_control, debug_pin])]
     fn position_control_input(cx: position_control_input::Context) {
+        // END mark
+        //cx.resources.debug_pin.toggle().unwrap();
+
         cx.resources.motor_control.handle_new_position();
+
+        // START mark
+        //cx.resources.debug_pin.set_high().unwrap();
     }
 
     extern "C" {
