@@ -225,8 +225,8 @@ const APP: () = {
             current_control_coil_b,
             position_control,
         );
-        motor_control.set_controller_p(0);
-        motor_control.set_controller_i(20);
+        motor_control.set_controller_p(5);
+        motor_control.set_controller_i(30);
         motor_control.set_controller_d(0);
 
         // CPU usage
