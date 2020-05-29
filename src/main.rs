@@ -448,12 +448,6 @@ const APP: () = {
                 write!(tx, "\n---------\n").ok();
                 nb::block!(tx.flush()).ok();
 
-                for (step, row) in &mut cal_data.position_at_cal_step.iter().enumerate() {
-                    for (angle_step, position) in row.iter().enumerate() {
-                        write!(tx, "{},{},{}\n", step, angle_step, position).ok();
-                        nb::block!(tx.flush()).ok();
-                    }
-                }
             }),
             Some(Command::ForceDuty(duty)) => {
                 cx.resources.motor_control.lock(|m| m.force_duty(duty))
