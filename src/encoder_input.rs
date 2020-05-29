@@ -4,8 +4,8 @@ use stm32f1xx_hal::gpio::*;
 
 use stepper_servo_lib::position_control::{Direction, PositionInput};
 
-const MAX_VALUE: i32 = 10_000;
-const MIN_VALUE: i32 = -10_000;
+const MAX_VALUE: i32 = i32::max_value();
+const MIN_VALUE: i32 = i32::min_value();
 
 pub struct EncoderInput<A, B> {
     pin_a: A,
