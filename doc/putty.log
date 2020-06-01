@@ -38400,3 +38400,52 @@ c 300 > OK
 c 400 > OK
 p 1000 > OK
 d > OK
+
+
+c 200 > OK
+cal > OK
+d > OK
+vca
+cal > OK
+p 1000 > OK
+e > OK
+p 3000 > OK
+p 2000 > OK
+p 1000 > OK
+p 3000 > OK
+
+
+
+c 200 > OK
+cal > OK
+p 2000 > OK
+e > OK
+p 3000 > OK
+p 1000 > OK
+p 4000 > OK
+p 2000 > OK
+
+
+
+c 200 > OK
+c 300 > OK
+cal > OK
+p 1000 > OK
+e > OK
+p 3000 > OK
+
+
+ca
+c 300 > OK
+cal > OK
+p 1000 > OK
+e > OK
+p 3000 > OK
+p 1000 > OK
+c 300 > OK
+cal > OK
+p 1000 > OK
+e > OK
+p 3000 > OK
+p 2000 > OK
+d > OK
