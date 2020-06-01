@@ -9,7 +9,7 @@ mod encoder_input;
 // Imports
 //use core::sync::atomic::{AtomicUsize, Ordering};
 //use cortex_m::asm::nop;
-use embedded_hal::digital::v2::OutputPin;
+//use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
 //use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
@@ -447,7 +447,6 @@ const APP: () = {
                 }
                 write!(tx, "\n---------\n").ok();
                 nb::block!(tx.flush()).ok();
-
             }),
             Some(Command::ForceDuty(duty)) => {
                 cx.resources.motor_control.lock(|m| m.force_duty(duty))
