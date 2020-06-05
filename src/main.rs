@@ -40,11 +40,12 @@ const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 20_000;
 
 const SHUNT_RESISTANCE: u32 = 220; //mOhms
 const ADC_1_OFFSET: u32 = 125; //bits
-const ADC_2_OFFSET: u32 = 115; //bits
+const ADC_2_OFFSET: u32 = 125; //bits
 
 // Types
 type AdcCoilAType = adc::AdcInt<pac::ADC1>;
-type AdcCoilBType = adc::AdcInt<pac::ADC2>;
+//type AdcCoilBType = adc::AdcInt<pac::ADC2>;
+type AdcCoilBType = adc::AdcInjInt<pac::ADC2>;
 type CurrentOutputCoilAType = current_output::CurrentOuput<
     pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C2>,
     gpioa::PA2<Output<PushPull>>,
@@ -136,8 +137,8 @@ const APP: () = {
         let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
         let mut adc = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
         adc.set_sample_time(adc::SampleTime::T_239);
-        let mut adc_coil_a = adc.into_interrupt(ch0);
-        adc_coil_a.enable_external_trigger(pac::adc1::cr2::EXTSEL_A::TIM2CC2);
+        let mut adc_coil_a = adc.into_reg_interrupt(ch0);
+        adc_coil_a.enable_ext_trigger(pac::adc1::cr2::EXTSEL_A::TIM2CC2);
 
         // Current Control - Coil A - DIR
         let in1 = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
@@ -154,8 +155,10 @@ const APP: () = {
         let ch0 = gpiob.pb1.into_analog(&mut gpiob.crl);
         let mut adc = adc::Adc::adc2(peripherals.ADC2, &mut rcc.apb2, clocks);
         adc.set_sample_time(adc::SampleTime::T_239);
-        let mut adc_coil_b = adc.into_interrupt(ch0);
-        adc_coil_b.enable_external_trigger(pac::adc2::cr2::EXTSEL_A::TIM2CC2);
+        let mut adc_coil_b = adc.into_inj_interrupt(ch0);
+        //let mut adc_coil_b = adc.into_reg_interrupt(ch0);
+        adc_coil_b.enable_ext_trigger(pac::adc2::cr2::JEXTSEL_A::TIM2CC1);
+        //adc_coil_b.enable_ext_trigger(pac::adc2::cr2::EXTSEL_A::TIM2CC2);
 
         // Current Control - Coil B - DIR
         let in1 = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
@@ -227,7 +230,7 @@ const APP: () = {
             current_control_coil_b,
             position_control,
         );
-        motor_control.set_controller_p(5);
+        motor_control.set_controller_p(2);
         motor_control.set_controller_i(30);
         motor_control.set_controller_d(0);
 
@@ -306,11 +309,11 @@ const APP: () = {
 
         // COIL A
         cx.resources.motor_control.lock(|m| {
-            let current_control_coil_a = m.coil_a().current_control();
-            adc_value = current_control_coil_a.adc_value() as i32;
-            voltage = current_control_coil_a.voltage() as i32;
-            current = current_control_coil_a.current() as i32;
-            duty_cycle = current_control_coil_a.get_current_output().duty_cycle() as i32;
+            let current_control = m.coil_a().current_control();
+            adc_value = current_control.adc_value() as i32;
+            voltage = current_control.voltage() as i32;
+            current = current_control.current() as i32;
+            duty_cycle = current_control.get_current_output().duty_cycle() as i32;
         });
 
         cx.resources
@@ -324,11 +327,11 @@ const APP: () = {
 
         // COIL B
         cx.resources.motor_control.lock(|m| {
-            let current_control_coil_a = m.coil_b().current_control();
-            adc_value = current_control_coil_a.adc_value() as i32;
-            voltage = current_control_coil_a.voltage() as i32;
-            current = current_control_coil_a.current() as i32;
-            duty_cycle = current_control_coil_a.get_current_output().duty_cycle() as i32;
+            let current_control = m.coil_b().current_control();
+            adc_value = current_control.adc_value() as i32;
+            voltage = current_control.voltage() as i32;
+            current = current_control.current() as i32;
+            duty_cycle = current_control.get_current_output().duty_cycle() as i32;
         });
 
         cx.resources
@@ -379,23 +382,24 @@ const APP: () = {
     fn handle_adc(cx: handle_adc::Context) {
         let adc_coil_a: &AdcCoilAType = &cx.resources.adc_coil_a;
         if adc_coil_a.is_ready() {
-            // END mark
-            cx.resources.debug_pin.set_low().unwrap();
             let adc_value = adc_coil_a.read_value() as u32;
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_a().current_control();
             current_control.add_sample(adc_value);
-
-            // START mark
-            cx.resources.debug_pin.set_high().unwrap();
         }
 
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
         if adc_coil_b.is_ready() {
+            // START mark
+            cx.resources.debug_pin.set_high().unwrap();
+
             let adc_value = adc_coil_b.read_value() as u32;
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_b().current_control();
             current_control.add_sample(adc_value);
+
+            // END mark
+            cx.resources.debug_pin.set_low().unwrap();
         }
     }
 

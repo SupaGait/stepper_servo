@@ -98,4 +98,8 @@ where
             }
         }
     }
+
+    fn get_max_output_value(&mut self) -> i32 {
+        self.motor.get_max_duty() as i32
+    }
 }
