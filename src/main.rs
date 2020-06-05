@@ -9,7 +9,7 @@ mod encoder_input;
 // Imports
 //use core::sync::atomic::{AtomicUsize, Ordering};
 //use cortex_m::asm::nop;
-//use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
 //use panic_halt as _;
 use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
@@ -22,9 +22,10 @@ use stepper_servo_lib::{
     serial_commands::{Command, SerialCommands},
 };
 use stm32f1xx_hal::{
-    adc, device,
+    adc,
     gpio::*,
     i2c::{BlockingI2c, DutyCycle, Mode},
+    pac,
     prelude::*,
     pwm,
     serial::{Config, Rx, Serial, Tx},
@@ -42,15 +43,15 @@ const ADC_1_OFFSET: u32 = 125; //bits
 const ADC_2_OFFSET: u32 = 115; //bits
 
 // Types
-type AdcCoilAType = adc::AdcInt<device::ADC1>;
-type AdcCoilBType = adc::AdcInt<device::ADC2>;
+type AdcCoilAType = adc::AdcInt<pac::ADC1>;
+type AdcCoilBType = adc::AdcInt<pac::ADC2>;
 type CurrentOutputCoilAType = current_output::CurrentOuput<
-    pwm::PwmChannel<device::TIM2, stm32f1xx_hal::pwm::C2>,
+    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C2>,
     gpioa::PA2<Output<PushPull>>,
     gpioa::PA3<Output<PushPull>>,
 >;
 type CurrentOutputCoilBType = current_output::CurrentOuput<
-    pwm::PwmChannel<device::TIM2, stm32f1xx_hal::pwm::C1>,
+    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C1>,
     gpioa::PA4<Output<PushPull>>,
     gpioa::PA5<Output<PushPull>>,
 >;
@@ -64,7 +65,7 @@ type MotorControlType = MotorControl<
 type DisplayType = display::Display<
     ssd1306::interface::i2c::I2cInterface<
         BlockingI2c<
-            device::I2C1,
+            pac::I2C1,
             (
                 gpiob::PB6<Alternate<OpenDrain>>,
                 gpiob::PB7<Alternate<OpenDrain>>,
@@ -72,9 +73,9 @@ type DisplayType = display::Display<
         >,
     >,
 >;
-type Usart1Type = (Tx<device::USART1>, Rx<device::USART1>);
+type Usart1Type = (Tx<pac::USART1>, Rx<pac::USART1>);
 
-#[rtfm::app(device = stm32f1xx_hal::device, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
+#[rtfm::app(device = stm32f1xx_hal::pac, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources {
         adc_coil_a: AdcCoilAType,
@@ -118,11 +119,12 @@ const APP: () = {
         let pwm_pin_coli_b = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
         let mut afio = peripherals.AFIO.constrain(&mut rcc.apb2);
         let timer2 = Timer::tim2(peripherals.TIM2, &clocks, &mut rcc.apb1);
-        let pwm_timer2 = timer2.pwm::<Tim2NoRemap, _, _, _>(
+        let mut pwm_timer2 = timer2.pwm::<Tim2NoRemap, _, _, _>(
             (pwm_pin_coli_b, pwm_pin_coil_a),
             &mut afio.mapr,
-            20.khz(),
+            40.khz(),
         );
+        pwm_timer2.change_pwm_mode(pac::tim2::cr1::CMS_A::CENTERALIGNED1);
         let pwm_channels = pwm_timer2.split();
         let mut pwm_coil_a = pwm_channels.1;
         let mut pwm_coil_b = pwm_channels.0;
@@ -135,7 +137,7 @@ const APP: () = {
         let mut adc = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
         adc.set_sample_time(adc::SampleTime::T_239);
         let mut adc_coil_a = adc.into_interrupt(ch0);
-        adc_coil_a.enable();
+        adc_coil_a.enable_external_trigger(pac::adc1::cr2::EXTSEL_A::TIM2CC2);
 
         // Current Control - Coil A - DIR
         let in1 = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
@@ -153,7 +155,7 @@ const APP: () = {
         let mut adc = adc::Adc::adc2(peripherals.ADC2, &mut rcc.apb2, clocks);
         adc.set_sample_time(adc::SampleTime::T_239);
         let mut adc_coil_b = adc.into_interrupt(ch0);
-        adc_coil_b.enable();
+        adc_coil_b.enable_external_trigger(pac::adc2::cr2::EXTSEL_A::TIM2CC2);
 
         // Current Control - Coil B - DIR
         let in1 = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
@@ -378,14 +380,14 @@ const APP: () = {
         let adc_coil_a: &AdcCoilAType = &cx.resources.adc_coil_a;
         if adc_coil_a.is_ready() {
             // END mark
-            //cx.resources.debug_pin.set_low().unwrap();
+            cx.resources.debug_pin.set_low().unwrap();
             let adc_value = adc_coil_a.read_value() as u32;
             let motor_control: &mut MotorControlType = cx.resources.motor_control;
             let current_control = motor_control.coil_a().current_control();
             current_control.add_sample(adc_value);
 
             // START mark
-            //cx.resources.debug_pin.set_high().unwrap();
+            cx.resources.debug_pin.set_high().unwrap();
         }
 
         let adc_coil_b: &AdcCoilBType = &cx.resources.adc_coil_b;
