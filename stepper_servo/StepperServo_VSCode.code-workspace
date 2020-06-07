@@ -1,0 +1,19 @@
+{
+    "folders": [
+        {
+            "name": "stepperServo",
+            "path": "."
+        },
+        {
+            "path": "..\\stepper_servo_lib"
+        },
+        {
+            "path": "..\\stm32f1xx-hal"
+        }
+    ],
+    "settings": {
+        "rust-analyzer.checkOnSave.allTargets": false
+    },
+    "rust.target": "thumbv7em-none-eabihf",
+    "rust.all_targets": false
+}
