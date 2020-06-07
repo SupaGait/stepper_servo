@@ -11,28 +11,32 @@ enum Direction {
 }
 
 /// For now hard bound to ADC1
-pub struct CurrentOuput<PWM, IN1, IN2>
+pub struct CurrentOuput<PWM, AdcTrigger, IN1, IN2>
 where
     PWM: PwmPin<Duty = u16>,
+    AdcTrigger: PwmPin<Duty = u16>,
     IN1: OutputPin,
     IN2: OutputPin,
 {
     duty_cycle: u32,
     motor: l298n::Motor<IN1, IN2, PWM>,
+    adc_trigger: AdcTrigger,
     direction: Direction,
     enabled: bool,
 }
 
-impl<PWM, IN1, IN2> CurrentOuput<PWM, IN1, IN2>
+impl<PWM, AdcTrigger, IN1, IN2> CurrentOuput<PWM, AdcTrigger, IN1, IN2>
 where
     PWM: PwmPin<Duty = u16>,
+    AdcTrigger: PwmPin<Duty = u16>,
     IN1: OutputPin,
     IN2: OutputPin,
 {
-    pub fn new(pwm: PWM, in1: IN1, in2: IN2) -> Self {
+    pub fn new(pwm: PWM, adc_trigger: AdcTrigger, in1: IN1, in2: IN2) -> Self {
         let mut s = Self {
             duty_cycle: 0,
             motor: l298n::Motor::new(in1, in2, pwm),
+            adc_trigger,
             direction: Direction::CW,
             enabled: false,
         };
@@ -69,13 +73,15 @@ where
             };
 
             self.motor.set_duty(self.duty_cycle as u16);
+            self.adc_trigger.set_duty(self.duty_cycle as u16);
         }
     }
 }
 
-impl<PWM, IN1, IN2> CurrentOutput for CurrentOuput<PWM, IN1, IN2>
+impl<PWM, AdcTrigger, IN1, IN2> CurrentOutput for CurrentOuput<PWM, AdcTrigger, IN1, IN2>
 where
     PWM: PwmPin<Duty = u16>,
+    AdcTrigger: PwmPin<Duty = u16>,
     IN1: OutputPin,
     IN2: OutputPin,
 {

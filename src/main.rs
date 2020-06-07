@@ -47,12 +47,14 @@ type AdcCoilAType = adc::AdcInt<pac::ADC1>;
 //type AdcCoilBType = adc::AdcInt<pac::ADC2>;
 type AdcCoilBType = adc::AdcInjInt<pac::ADC2>;
 type CurrentOutputCoilAType = current_output::CurrentOuput<
-    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C2>,
-    gpioa::PA2<Output<PushPull>>,
-    gpioa::PA3<Output<PushPull>>,
+    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C3>,
+    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C1>,
+    gpioa::PA0<Output<PushPull>>,
+    gpioa::PA1<Output<PushPull>>,
 >;
 type CurrentOutputCoilBType = current_output::CurrentOuput<
-    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C1>,
+    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C4>,
+    pwm::PwmChannel<pac::TIM2, stm32f1xx_hal::pwm::C2>,
     gpioa::PA4<Output<PushPull>>,
     gpioa::PA5<Output<PushPull>>,
 >;
@@ -116,34 +118,35 @@ const APP: () = {
         core.DWT.enable_cycle_counter();
 
         // Current Control - Coil A & B - PWM
-        let pwm_pin_coil_a = gpioa.pa1.into_alternate_push_pull(&mut gpioa.crl);
-        let pwm_pin_coli_b = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
+        let pwm_pin_coil_a = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
+        let pwm_pin_coli_b = gpioa.pa3.into_alternate_push_pull(&mut gpioa.crl);
         let mut afio = peripherals.AFIO.constrain(&mut rcc.apb2);
         let timer2 = Timer::tim2(peripherals.TIM2, &clocks, &mut rcc.apb1);
         let mut pwm_timer2 = timer2.pwm::<Tim2NoRemap, _, _, _>(
-            (pwm_pin_coli_b, pwm_pin_coil_a),
+            (pwm_pin_coil_a, pwm_pin_coli_b),
             &mut afio.mapr,
             40.khz(),
         );
-        pwm_timer2.change_pwm_mode(pac::tim2::cr1::CMS_A::CENTERALIGNED1);
-        let pwm_channels = pwm_timer2.split();
-        let mut pwm_coil_a = pwm_channels.1;
-        let mut pwm_coil_b = pwm_channels.0;
+        let (mut coil_a_trigger_adc, mut coil_b_trigger_adc) = pwm_timer2.config_ch1_ch2();
+        pwm_timer2.change_pwm_mode(pac::tim2::cr1::CMS_A::CENTERALIGNED2);
+        let (mut pwm_coil_a, mut pwm_coil_b) = pwm_timer2.split();
 
+        coil_a_trigger_adc.enable();
+        coil_b_trigger_adc.enable();
         pwm_coil_a.enable();
         pwm_coil_b.enable();
 
         // Current Control - Coil A - ADC
         let ch0 = gpiob.pb0.into_analog(&mut gpiob.crl);
         let mut adc = adc::Adc::adc1(peripherals.ADC1, &mut rcc.apb2, clocks);
-        adc.set_sample_time(adc::SampleTime::T_239);
+        adc.set_sample_time(adc::SampleTime::T_41);
         let mut adc_coil_a = adc.into_reg_interrupt(ch0);
         adc_coil_a.enable_ext_trigger(pac::adc1::cr2::EXTSEL_A::TIM2CC2);
 
         // Current Control - Coil A - DIR
-        let in1 = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
-        let in2 = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
-        let current_output = CurrentOutputCoilAType::new(pwm_coil_a, in1, in2);
+        let in1 = gpioa.pa0.into_push_pull_output(&mut gpioa.crl);
+        let in2 = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
+        let current_output = CurrentOutputCoilAType::new(pwm_coil_a, coil_a_trigger_adc, in1, in2);
         let current_control_coil_a = CurrentControl::new(
             SHUNT_RESISTANCE,
             current_output,
@@ -154,7 +157,7 @@ const APP: () = {
         // Current Control - Coil B - ADC
         let ch0 = gpiob.pb1.into_analog(&mut gpiob.crl);
         let mut adc = adc::Adc::adc2(peripherals.ADC2, &mut rcc.apb2, clocks);
-        adc.set_sample_time(adc::SampleTime::T_239);
+        adc.set_sample_time(adc::SampleTime::T_41);
         let mut adc_coil_b = adc.into_inj_interrupt(ch0);
         //let mut adc_coil_b = adc.into_reg_interrupt(ch0);
         adc_coil_b.enable_ext_trigger(pac::adc2::cr2::JEXTSEL_A::TIM2CC1);
@@ -163,7 +166,7 @@ const APP: () = {
         // Current Control - Coil B - DIR
         let in1 = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
         let in2 = gpioa.pa5.into_push_pull_output(&mut gpioa.crl);
-        let current_output = CurrentOutputCoilBType::new(pwm_coil_b, in1, in2);
+        let current_output = CurrentOutputCoilBType::new(pwm_coil_b, coil_b_trigger_adc, in1, in2);
         let current_control_coil_b = CurrentControl::new(
             SHUNT_RESISTANCE,
             current_output,
