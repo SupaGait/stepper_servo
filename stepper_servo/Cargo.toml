@@ -4,18 +4,6 @@ version = "0.1.0"
 authors = ["Supagait <gklomphaar@hotmail.com>"]
 edition = "2018"
 
-[profile.release]
-opt-level = 's'
-lto = true
-#debug = true
-
-#[profile.dev.package."*"]
-#opt-level = 's'
-
-[profile.dev]
-opt-level = 's'
-#lto = true
-
 [dependencies]
 embedded-hal = "0.2.3"
 # provides access to low level ARM CPU registers (used for delay)
@@ -25,7 +13,7 @@ cortex-m-rt = "0.6.11"
 #panic-semihosting = "0.5.3"
 panic-halt = "0.2.0"
 # Higher level drivers/functionality
-cortex-m-rtfm = "0.5.1"
+cortex-m-rtic = "0.5.3"
 rotary-encoder-hal = "0.2.1"
 ssd1306 = "0.3.1"
 l298n = "0.1.3"

@@ -32,6 +32,22 @@
             "group": "build",
         },
         {
+            "label": "test stepper_servo_lib",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test",
+                "-p",
+                "stepper_servo_lib",
+                "--target",
+                "x86_64-pc-windows-msvc",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "test",
+        },
+        {
             "label": "copy_binary (debug)",
             "type": "shell",
             "command": "arm-none-eabi-objcopy",
@@ -84,7 +100,7 @@
             },
             "problemMatcher": [],
             "dependsOn": "copy_binary (debug)"
-        }
+        },
         {
             "label": "load_firmware (release)",
             "type": "shell",

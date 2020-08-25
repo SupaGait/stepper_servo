@@ -12,7 +12,7 @@ mod encoder_input;
 use embedded_hal::digital::v2::OutputPin;
 use panic_halt as _;
 //use panic_halt as _;
-use rtfm::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
+use rtic::cyccnt::{Duration, Instant, U32Ext /*CYCCNT*/};
 //use rtfm::Monotonic;
 use core::fmt::Write;
 use nb;
@@ -78,7 +78,7 @@ type DisplayType = display::Display<
 >;
 type Usart1Type = (Tx<pac::USART1>, Rx<pac::USART1>);
 
-#[rtfm::app(device = stm32f1xx_hal::pac, peripherals = true, monotonic = rtfm::cyccnt::CYCCNT)]
+#[rtic::app(device = stm32f1xx_hal::pac, peripherals = true, monotonic = rtic::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources {
         adc_coil_a: AdcCoilAType,
@@ -484,7 +484,7 @@ const APP: () = {
                 //cx.resources.debug_pin.set_low().unwrap();
 
                 let sleep = Instant::now();
-                rtfm::export::wfi();
+                rtic::export::wfi();
 
                 // START mark
                 //cx.resources.debug_pin.set_high().unwrap();

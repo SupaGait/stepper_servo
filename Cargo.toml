@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "stepper_servo",
+    "stepper_servo_lib",
+    "stm32f1xx-hal",
+]
+
+[profile.release]
+opt-level = 's'
+lto = true
+#debug = true
+
+[profile.dev]
+opt-level = 's'
+#lto = true
