@@ -24,9 +24,6 @@ where
     fn get_position(&self) -> i32 {
         self.position
     }
-    fn get_direction(&self) -> Direction {
-        self.direction
-    }
     //        | A_up | A_down |  B_up | B_down |
     //        ---------------------------------
     // A_up   |  X   |   X    |   I   |   D    |

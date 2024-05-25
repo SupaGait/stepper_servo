@@ -2,6 +2,8 @@
 #![no_main]
 
 // Local modules
+mod AS5045;
+mod AS5045_position;
 mod current_output;
 mod display;
 mod encoder_input;
@@ -29,6 +31,7 @@ use stm32f1xx_hal::{
     prelude::*,
     pwm,
     serial::{Config, Rx, Serial, Tx},
+    spi,
     timer::{Tim2NoRemap, Timer},
 };
 
@@ -37,6 +40,7 @@ const BLINKING_LED_PERIOD: u32 = DWT_FREQ / 2;
 const DISPLAY_REFRESH_PERIOD: u32 = DWT_FREQ / 10;
 const MOTOR_CONTROL_PERIOD: u32 = DWT_FREQ / 1_000;
 const CONTROL_LOOP_PERIOD: u32 = DWT_FREQ / 20_000;
+const POSITION_UPDATE_PERIOD: u32 = DWT_FREQ / 2_000;
 
 const SHUNT_RESISTANCE: u32 = 220; //mOhms
 const ADC_1_OFFSET: u32 = 125; //bits
@@ -58,8 +62,33 @@ type CurrentOutputCoilBType = current_output::CurrentOuput<
     gpioa::PA4<Output<PushPull>>,
     gpioa::PA5<Output<PushPull>>,
 >;
-type PositionControlType =
-    encoder_input::EncoderInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
+// type AS5045Type = AS5045::AS5045<
+//     spi::Spi<
+//         pac::SPI1,
+//         spi::Spi1Remap,
+//         (
+//             gpiob::PB3<Alternate<PushPull>>,
+//             gpiob::PB4<Input<Floating>>,
+//             gpiob::PB5<Alternate<PushPull>>,
+//         ),
+//     >,
+//     gpioa::PA15<Output<PushPull>>,
+// >;
+type PositionControlType = AS5045_position::AS504Position<
+    spi::Spi<
+        pac::SPI1,
+        spi::Spi1Remap,
+        (
+            gpiob::PB3<Alternate<PushPull>>,
+            gpiob::PB4<Input<Floating>>,
+            gpiob::PB5<Alternate<PushPull>>,
+        ),
+    >,
+    gpioa::PA15<Output<PushPull>>,
+>;
+
+// type PositionControlType =
+//     encoder_input::EncoderInput<gpiob::PB10<Input<PullUp>>, gpiob::PB11<Input<PullUp>>>;
 type MotorControlType = MotorControl<
     CurrentControl<CurrentOutputCoilAType>,
     CurrentControl<CurrentOutputCoilBType>,
@@ -76,6 +105,7 @@ type DisplayType = display::Display<
         >,
     >,
 >;
+
 type Usart1Type = (Tx<pac::USART1>, Rx<pac::USART1>);
 
 #[rtic::app(device = stm32f1xx_hal::pac, peripherals = true, monotonic = rtic::cyccnt::CYCCNT)]
@@ -93,7 +123,7 @@ const APP: () = {
         processor_usage: i32,
     }
 
-    #[init(schedule = [blink_led, update_motor, control_loop, update_display, cpu_usage])]
+    #[init(schedule = [blink_led, update_motor, control_loop, update_position, update_display, cpu_usage])]
     fn init(cx: init::Context) -> init::LateResources {
         let peripherals = cx.device;
         let mut core = cx.core;
@@ -154,6 +184,33 @@ const APP: () = {
             adc_coil_a.max_sample() as u32,
         );
 
+        // Disable JTAG, since we want to use those pins for SPI
+        let (pa15, pb3, pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
+
+        // Position readout
+        let AS5045_spi_pins = (
+            pb3.into_alternate_push_pull(&mut gpiob.crl),
+            pb4.into_floating_input(&mut gpiob.crl),
+            gpiob.pb5.into_alternate_push_pull(&mut gpiob.crl),
+        );
+        let AS5045_CS_pin = pa15.into_push_pull_output(&mut gpioa.crh);
+
+        let spi_mode = spi::Mode {
+            polarity: spi::Polarity::IdleHigh,
+            phase: spi::Phase::CaptureOnSecondTransition,
+        };
+        let spi = spi::Spi::spi1(
+            peripherals.SPI1,
+            AS5045_spi_pins,
+            &mut afio.mapr,
+            spi_mode,
+            100.khz(),
+            clocks,
+            &mut rcc.apb2,
+        );
+        let as5045 = AS5045::AS5045::new(spi, AS5045_CS_pin);
+        let position_control = AS5045_position::AS504Position::new(as5045);
+
         // Current Control - Coil B - ADC
         let ch0 = gpiob.pb1.into_analog(&mut gpiob.crl);
         let mut adc = adc::Adc::adc2(peripherals.ADC2, &mut rcc.apb2, clocks);
@@ -175,15 +232,15 @@ const APP: () = {
         );
 
         // Position control
-        let mut position_pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
-        position_pin_a.make_interrupt_source(&mut afio);
-        position_pin_a.trigger_on_edge(&peripherals.EXTI, Edge::RISING_FALLING);
-        position_pin_a.enable_interrupt(&peripherals.EXTI);
-        let mut position_pin_b = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
-        position_pin_b.make_interrupt_source(&mut afio);
-        position_pin_b.trigger_on_edge(&peripherals.EXTI, Edge::RISING_FALLING);
-        position_pin_b.enable_interrupt(&peripherals.EXTI);
-        let position_control = encoder_input::EncoderInput::new(position_pin_a, position_pin_b);
+        // let mut position_pin_a = gpiob.pb10.into_pull_up_input(&mut gpiob.crh);
+        // position_pin_a.make_interrupt_source(&mut afio);
+        // position_pin_a.trigger_on_edge(&peripherals.EXTI, Edge::RISING_FALLING);
+        // position_pin_a.enable_interrupt(&peripherals.EXTI);
+        // let mut position_pin_b = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
+        // position_pin_b.make_interrupt_source(&mut afio);
+        // position_pin_b.trigger_on_edge(&peripherals.EXTI, Edge::RISING_FALLING);
+        // position_pin_b.enable_interrupt(&peripherals.EXTI);
+        // let position_control = encoder_input::EncoderInput::new(position_pin_a, position_pin_b);
 
         // Led
         let onboard_led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
@@ -240,6 +297,11 @@ const APP: () = {
         // CPU usage
         cx.schedule.cpu_usage(cx.start + DWT_FREQ.cycles()).unwrap();
 
+        // Position retrieval
+        cx.schedule
+            .update_position(cx.start + POSITION_UPDATE_PERIOD.cycles())
+            .unwrap();
+
         // Motor update
         cx.schedule
             .update_motor(cx.start + MOTOR_CONTROL_PERIOD.cycles())
@@ -267,7 +329,7 @@ const APP: () = {
         }
     }
 
-    #[task(schedule = [cpu_usage],  priority = 5,
+    #[task(schedule = [cpu_usage],  priority = 4,
         resources = [total_sleep_time, processor_usage])]
     fn cpu_usage(cx: cpu_usage::Context) {
         // Calc elapsed time
@@ -291,10 +353,19 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(schedule = [update_motor],  priority = 5,
+    #[task(schedule = [update_position],  priority = 5,
+        resources = [motor_control])]
+    fn update_position(mut cx: update_position::Context) {
+        cx.resources.motor_control.lock(|m| m.handle_new_position());
+        cx.schedule
+            .update_position(cx.scheduled + POSITION_UPDATE_PERIOD.cycles())
+            .unwrap();
+    }
+
+    #[task(schedule = [update_motor],  priority = 6,
         resources = [motor_control])]
     fn update_motor(mut cx: update_motor::Context) {
-        // Returns nex required update in cycles
+        // Returns next required update in cycles
         let mut next_call_us = 0;
         cx.resources
             .motor_control
@@ -359,6 +430,12 @@ const APP: () = {
             .motor_control
             .lock(|m| position = m.position_control().get_current_position());
         cx.resources.display.update_row_column("P", 7, 8, position);
+
+        // let as5045: &mut AS5045Type = &mut cx.resources.as5045;
+        // let value = as5045.read_angle().unwrap();
+        // let value = value;
+
+        // cx.resources.display.update_row_column("P", 7, 8, value);
 
         // Re-shedule
         cx.schedule
@@ -451,7 +528,7 @@ const APP: () = {
             Some(Command::ShowCalData) => cx.resources.motor_control.lock(|m| {
                 let cal_data = m.position_control().get_calibration_data();
                 for data in &mut cal_data.pulse_at_angle.iter() {
-                    write!(tx, "{}\n", data).ok();
+                    write!(tx, "{}\r\n", data).ok();
                     nb::block!(tx.flush()).ok();
                 }
                 write!(tx, "\n---------\n").ok();
@@ -469,7 +546,7 @@ const APP: () = {
         }
         nb::block!(tx.flush()).ok();
         if data == b'\r' {
-            write!(tx, "\n").ok();
+            write!(tx, "\r\n").ok();
         } else {
             nb::block!(tx.write(data)).ok();
         }
@@ -496,22 +573,24 @@ const APP: () = {
         }
     }
 
-    #[task(binds = EXTI15_10, priority = 10,
-        resources = [ motor_control, debug_pin])]
-    fn position_control_input(cx: position_control_input::Context) {
-        // END mark
-        //cx.resources.debug_pin.toggle().unwrap();
+    // #[task(binds = EXTI15_10, priority = 10,
+    //     resources = [ motor_control, debug_pin])]
+    // fn position_control_input(cx: position_control_input::Context) {
+    //     // END mark
+    //     //cx.resources.debug_pin.toggle().unwrap();
 
-        cx.resources.motor_control.handle_new_position();
+    //     cx.resources.motor_control.handle_new_position();
 
-        // START mark
-        //cx.resources.debug_pin.set_high().unwrap();
-    }
+    //     // START mark
+    //     //cx.resources.debug_pin.set_high().unwrap();
+    // }
 
     extern "C" {
         // used interrupts for SW sheduling.
         fn DMA1_CHANNEL1();
         fn DMA1_CHANNEL2();
         fn DMA1_CHANNEL3();
+        fn CAN_RX1();
+        fn CAN_SCE();
     }
 };
