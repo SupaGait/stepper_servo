@@ -1,0 +1,7 @@
+[submodule "stepper_servo_lib"] 
+  path = stepper_servo_lib 
+  url = https://github.com/SupaGait/stepper_servo_lib.git
+
+  [submodule "stm32f1xx-hal"] 
+  path = stm32f1xx-hal 
+  url = https://github.com/SupaGait/stm32f1xx-hal.git
